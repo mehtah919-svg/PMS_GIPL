@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SITEBOARD — Project Control</title>
+<style>
+  :root{
+    --bg:#EDF1F1;
+    --surface:#FFFFFF;
+    --surface-alt:#F5F7F6;
+    --ink:#122631;
+    --ink-soft:#5B6E77;
+    --ink-faint:#93A3AA;
+    --accent:#1B4B6B;
+    --accent-dark:#0F3450;
+    --accent-soft:#DCE7EC;
+    --warn:#D9662F;
+    --warn-soft:#FBE7DB;
+    --good:#2F8F5B;
+    --good-soft:#DFEFE4;
+    --line:#D3DCDD;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'IBM Plex Sans',sans-serif;
+    --font-mono:'IBM Plex Mono',monospace;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;}
+  #app{display:flex;min-height:100vh;}
+
+  .sidebar{width:220px;flex-shrink:0;background:var(--accent-dark);color:#fff;display:flex;flex-direction:column;padding:22px 0;}
+  .brand{padding:0 20px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.12);margin-bottom:14px;}
+  .brand-mark{font-family:var(--font-display);font-weight:700;font-size:18px;letter-spacing:0.02em;}
+  .brand-sub{font-family:var(--font-mono);font-size:10.5px;color:#9FC0D6;margin-top:3px;letter-spacing:0.06em;text-transform:uppercase;}
+  .nav{display:flex;flex-direction:column;gap:2px;padding:0 10px;flex:1;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:6px;cursor:pointer;color:#C7D9E2;font-size:13px;font-weight:500;transition:background .12s;}
+  .nav-item:hover{background:rgba(255,255,255,0.06);}
+  .nav-item.active{background:var(--accent);color:#fff;}
+  .nav-icon{width:16px;text-align:center;font-family:var(--font-mono);font-size:12px;opacity:.9;}
+  .sidebar-foot{padding:14px 20px 0 20px;border-top:1px solid rgba(255,255,255,0.12);margin-top:12px;}
+  .newproj-btn{width:100%;background:var(--accent);color:#fff;border:none;padding:9px 10px;border-radius:6px;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer;}
+  .newproj-btn:hover{background:#24597e;}
+
+  .main{flex:1;padding:28px 34px;max-width:1180px;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:10px;}
+  .page-title{font-family:var(--font-display);font-weight:700;font-size:22px;}
+  .page-sub{color:var(--ink-soft);font-size:12.5px;margin-top:3px;}
+  select.projsel{font-family:var(--font-body);font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--ink);min-width:220px;}
+  .backlink{font-size:12px;color:var(--accent);cursor:pointer;font-weight:600;margin-bottom:8px;display:inline-block;}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+  .pcard{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;cursor:pointer;position:relative;}
+  .pcard:hover{border-color:var(--accent);}
+  .pcard-top{display:flex;justify-content:space-between;align-items:flex-start;}
+  .pcard-name{font-family:var(--font-display);font-weight:600;font-size:15px;}
+  .pcard-loc{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+  .status-pill{font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:20px;font-weight:600;}
+  .status-active{background:var(--good-soft);color:var(--good);}
+  .status-hold{background:var(--warn-soft);color:var(--warn);}
+  .status-done{background:var(--accent-soft);color:var(--accent);}
+  .pcard-mid{display:flex;gap:14px;margin-top:14px;align-items:center;}
+  .gauge{position:relative;width:64px;height:64px;flex-shrink:0;}
+  .gauge svg{transform:rotate(-90deg);}
+  .gauge-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px;font-weight:600;}
+  .pcard-stats{flex:1;}
+  .stat-row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft);margin-bottom:3px;}
+  .stat-row b{color:var(--ink);font-family:var(--font-mono);font-weight:600;}
+  .alert-dot{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--warn);}
+  .empty{color:var(--ink-soft);font-size:13px;padding:40px 0;text-align:center;border:1px dashed var(--line);border-radius:10px;}
+
+  table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:8px;overflow:hidden;}
+  th{text-align:left;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);background:var(--surface-alt);padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;}
+  tr:last-child td{border-bottom:none;}
+  td.num,th.num{text-align:right;font-family:var(--font-mono);}
+  .row-neg{color:var(--warn);}
+  .row-pos{color:var(--good);}
+  .totrow td{font-weight:600;background:var(--surface-alt);font-family:var(--font-mono);}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:18px;}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px;}
+  label{font-size:11px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px;}
+  input,select,textarea{width:100%;padding:8px 9px;border:1px solid var(--line);border-radius:6px;font-family:var(--font-body);font-size:13px;background:#fff;color:var(--ink);}
+  textarea{resize:vertical;min-height:44px;}
+  .btn{background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;font-size:12.5px;cursor:pointer;font-family:var(--font-body);}
+  .btn:hover{background:var(--accent-dark);}
+  .btn-ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);}
+  .btn-ghost:hover{background:var(--accent-soft);}
+  .btn-del{background:transparent;color:var(--warn);border:none;cursor:pointer;font-size:12px;padding:3px 6px;}
+  .btn-sm{padding:6px 12px;font-size:11.5px;}
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .section-title{font-family:var(--font-display);font-weight:600;font-size:15px;margin:22px 0 10px 0;}
+
+  .gantt-row{padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer;}
+  .gantt-row:hover .task-name{color:var(--accent);}
+  .gr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+  .gr-meta{font-size:11px;color:var(--ink-soft);margin:3px 0 6px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  .gr-foot{display:flex;justify-content:flex-end;margin-top:4px;}
+  .gantt-track{position:relative;height:16px;background:var(--surface-alt);border-radius:4px;}
+  .gantt-bar{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--accent);}
+  .gantt-bar.done{background:var(--good);}
+  .gantt-bar.overdue{background:var(--warn);}
+  .task-name{font-size:13px;font-weight:600;}
+  .pct{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);}
+  .gantt-header{display:grid;grid-template-columns:180px 1fr 90px;gap:10px;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.05em;padding-bottom:6px;}
+
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px;}
+  .stat-box{background:var(--surface-alt);border-radius:8px;padding:12px 14px;}
+  .stat-box .k{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;font-family:var(--font-mono);}
+  .stat-box .v{font-family:var(--font-mono);font-weight:600;font-size:17px;margin-top:4px;}
+  .stat-box .v.warn{color:var(--warn);}
+  .stat-box .v.good{color:var(--good);}
+  .badge{display:inline-block;font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:20px;font-weight:600;margin-left:8px;vertical-align:middle;}
+  .badge.behind{background:var(--warn-soft);color:var(--warn);}
+  .badge.ontrack{background:var(--good-soft);color:var(--good);}
+  .badge.ahead{background:var(--good-soft);color:var(--good);}
+
+  .modal-back{position:fixed;inset:0;background:rgba(15,29,38,0.45);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .modal{background:#fff;border-radius:10px;padding:22px;width:440px;max-width:92vw;}
+  .modal h3{font-family:var(--font-display);margin:0 0 14px 0;font-size:16px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+
+  ::placeholder{color:var(--ink-faint);}
+  @media (max-width:760px){
+    #app{flex-direction:column;}
+    .sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:12px;}
+    .brand,.sidebar-foot{display:none;}
+    .nav{flex-direction:row;flex:none;}
+    .main{padding:18px;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ============================================================
+     FIREBASE SETUP — your project's config is filled in below.
+     ============================================================ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCfJORRIuIbcm3nQLFlYGGg5FCZ8qilOGo",
+  authDomain: "siteboard-graphonet-infra.firebaseapp.com",
+  projectId: "siteboard-graphonet-infra",
+  storageBucket: "siteboard-graphonet-infra.firebasestorage.app",
+  messagingSenderId: "515776941783",
+  appId: "1:515776941783:web:030cf850edc960e485aa92"
+};
+/* Auto-detect where this file is running:
+   - Inside Claude's own preview, window.storage exists — use that (fast local preview, not team-shared).
+   - Anywhere else (downloaded file, GitHub Pages, etc.) — window.storage doesn't exist, so use
+     Firebase Firestore instead (team-shared, works on any device). No manual switching needed. */
+const HAS_ARTIFACT_STORAGE = (typeof window.storage !== 'undefined');
+let db = null;
+if(!HAS_ARTIFACT_STORAGE){
+  try{
+    if(typeof firebase === 'undefined') throw new Error('Firebase SDK did not load (check your internet connection).');
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+  }catch(e){
+    console.error('Firebase init failed:', e);
+    db = null;
+  }
+}
+</script>
+
+<script>
+const STATUS_OPTS = ['Active','On Hold','Completed'];
+const RES_TYPES = ['Labour','Equipment','Material'];
+
+let state = {
+  projects: [],
+  pdata: {},
+  currentTab: 'dashboard',
+  currentProjectId: null,
+  currentTaskId: null,
+  loaded: false,
+  modal: null,
+  planEditOpen: false
+};
+
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function fmtINR(n){
+  n = Number(n)||0;
+  return '₹' + n.toLocaleString('en-IN', {maximumFractionDigits:0});
+}
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if(isNaN(dt)) return '—';
+  return dt.toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+}
+function isoDate(d){ return d.toISOString().slice(0,10); }
+function emptyPData(){ return {tasks:[], boq:[], resources:[], dpr:[]}; }
+
+/* ---- Storage layer — auto-switches between Claude's artifact storage (preview)
+   and Firebase Firestore (team-shared, when deployed outside Claude). ---- */
+async function loadProjects(){
+  try{
+    if(HAS_ARTIFACT_STORAGE){
+      const r = await window.storage.get('projects', false);
+      state.projects = r ? JSON.parse(r.value) : [];
+    } else if(db){
+      const snap = await db.collection('meta').doc('projects').get();
+      state.projects = snap.exists ? (snap.data().list || []) : [];
+    } else { state.projects = []; }
+  }catch(e){ console.error('load projects failed', e); state.projects = []; }
+  state.loaded = true;
+}
+async function saveProjects(){
+  try{
+    if(HAS_ARTIFACT_STORAGE){ await window.storage.set('projects', JSON.stringify(state.projects), false); }
+    else if(db){ await db.collection('meta').doc('projects').set({list: state.projects}); }
+  }catch(e){ console.error('save projects failed', e); }
+}
+async function loadPData(id){
+  if(state.pdata[id]) return state.pdata[id];
+  try{
+    if(HAS_ARTIFACT_STORAGE){
+      const r = await window.storage.get('pdata:'+id, false);
+      state.pdata[id] = r ? JSON.parse(r.value) : emptyPData();
+    } else if(db){
+      const snap = await db.collection('pdata').doc(id).get();
+      state.pdata[id] = snap.exists ? snap.data() : emptyPData();
+    } else { state.pdata[id] = emptyPData(); }
+  }catch(e){ console.error('load pdata failed', e); state.pdata[id] = emptyPData(); }
+  if(!state.pdata[id].tasks) state.pdata[id].tasks = [];
+  if(!state.pdata[id].boq) state.pdata[id].boq = [];
+  if(!state.pdata[id].resources) state.pdata[id].resources = [];
+  if(!state.pdata[id].dpr) state.pdata[id].dpr = [];
+  state.pdata[id].tasks.forEach(t=>{ if(!t.logs) t.logs=[]; });
+  return state.pdata[id];
+}
+async function savePData(id){
+  try{
+    if(HAS_ARTIFACT_STORAGE){ await window.storage.set('pdata:'+id, JSON.stringify(state.pdata[id]), false); }
+    else if(db){ await db.collection('pdata').doc(id).set(state.pdata[id]); }
+  }catch(e){ console.error('save pdata failed', e); }
+}
+
+/* ---- Activity planning + progress math ---- */
+function taskCalc(t){
+  const qty = Number(t.qty)||0;
+  const outputRate = Number(t.outputRate)||0;
+  const resources = Number(t.resources)||0;
+  const dailyTarget = outputRate*resources;
+  const start = new Date(t.start);
+  const plannedDays = dailyTarget>0 ? Math.ceil(qty/dailyTarget) : 0;
+  const plannedEnd = new Date(start); plannedEnd.setDate(plannedEnd.getDate() + Math.max(0,plannedDays-1));
+
+  const logs = (t.logs||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const cumDone = logs.reduce((s,l)=>s+(Number(l.qty)||0),0);
+  const percent = qty>0 ? Math.min(100, Math.round((cumDone/qty)*1000)/10) : 0;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const startMid = new Date(start); startMid.setHours(0,0,0,0);
+  const daysElapsed = Math.max(1, Math.round((today-startMid)/86400000)+1);
+  const actualRate = daysElapsed>0 ? cumDone/daysElapsed : 0;
+  const remainingQty = Math.max(0, qty-cumDone);
+
+  let projectedEnd = null, projectedDaysRemaining = null;
+  if(remainingQty<=0){
+    projectedEnd = logs.length ? new Date(logs[logs.length-1].date) : plannedEnd;
+  } else if(actualRate>0){
+    projectedDaysRemaining = Math.ceil(remainingQty/actualRate);
+    projectedEnd = new Date(today); projectedEnd.setDate(projectedEnd.getDate()+projectedDaysRemaining);
+  }
+
+  const targetCumToday = dailyTarget>0 ? Math.min(qty, dailyTarget*daysElapsed) : 0;
+  const variance = cumDone - targetCumToday;
+
+  const daysLeftPlanned = Math.max(0, Math.round((plannedEnd-today)/86400000));
+  const catchUpDaily = (remainingQty>0 && daysLeftPlanned>0) ? Math.ceil((remainingQty/daysLeftPlanned)*10)/10 : null;
+
+  let statusLabel='ontrack', statusText='On track';
+  if(remainingQty<=0){ statusLabel='ahead'; statusText='Completed'; }
+  else if(variance < -0.001){ statusLabel='behind'; statusText='Behind schedule'; }
+  else if(variance > 0.001){ statusLabel='ahead'; statusText='Ahead of target'; }
+
+  return {qty, outputRate, resources, dailyTarget, plannedDays, plannedEnd, cumDone, percent,
+    daysElapsed, actualRate, remainingQty, projectedEnd, targetCumToday, variance,
+    daysLeftPlanned, catchUpDaily, statusLabel, statusText};
+}
+
+/* ---- Standard output-rate guesses for auto-planning from BOQ ---- */
+const STD_OUTPUT_RATES = [
+  {kw:['dlc'], rate:15, res:1},
+  {kw:['pcc'], rate:10, res:1},
+  {kw:['rcc','reinforced concrete','column','beam','slab','footing','stem','base slab'], rate:8, res:1},
+  {kw:['paver block','paver'], rate:50, res:1},
+  {kw:['brick work','brickwork','brick'], rate:6, res:1},
+  {kw:['plaster'], rate:25, res:1},
+  {kw:['wmm','gsb','sub base','sub-base','base course','subgrade','embankment'], rate:60, res:1},
+  {kw:['dbm','bituminous concrete','wearing course',' bc '], rate:60, res:1},
+  {kw:['kerb','curb'], rate:30, res:1},
+  {kw:['excavation','earthwork','earth work'], rate:45, res:1},
+  {kw:['shuttering','formwork','centering'], rate:20, res:1},
+  {kw:['steel','reinforcement'], rate:500, res:1},
+  {kw:['boundary wall','compound wall'], rate:4, res:1},
+  {kw:['road'], rate:50, res:1},
+  {kw:['bedding'], rate:60, res:1},
+  {kw:['pipe laying','pipeline'], rate:50, res:1},
+  {kw:['jointing','testing'], rate:60, res:1},
+  {kw:['cover slab'], rate:10, res:1},
+  {kw:['precast post','precast panel','precast'], rate:15, res:1},
+  {kw:['gate'], rate:1, res:1},
+  {kw:['waterproofing'], rate:20, res:1},
+  {kw:['coping'], rate:15, res:1},
+  {kw:['drain'], rate:15, res:1},
+];
+const UNIT_FALLBACK_RATE = {cum:8, sqm:30, rmt:20, sqft:150, kg:500, mt:0.5, nos:10, ton:0.5, cft:200};
+function guessOutputRate(itemName, unit){
+  const n = (itemName||'').toLowerCase();
+  for(const r of STD_OUTPUT_RATES){ if(r.kw.some(k=>n.includes(k))) return {outputRate:r.rate, resources:r.res}; }
+  const u = (unit||'').toLowerCase().trim();
+  const fallback = UNIT_FALLBACK_RATE[u] ?? 10;
+  return {outputRate:fallback, resources:1};
+}
+
+/* ---- Project types — each type has its own construction sequence (what happens before what) ---- */
+const PROJECT_TYPES = ['Building','Road / Highway','Boundary Wall (Brick/RCC)','Boundary Wall (Precast)','Retaining Wall (RCC)','Drain','Box Culvert / Bridge','Pipeline (Water/Sewer)','Other / Custom'];
+
+/* ---- Seeded import: Graphonet Civil Work Status sheet dt. 24.08.26 ---- */
+const SEED_GRAPHONET_PROJECT = {name:"TMU, Nagpur Project", projectType:"Other / Custom", location:"Nagpur", value:0, startDate:"2026-08-12", endDate:"2026-09-13", status:"Active"};
+const SEED_GRAPHONET_TASKS = [{"name":"Acid tank waterproofing \u2014 nozzle fixing and grouting","qty":400.0,"unit":"nos","outputRate":36.36,"resources":1,"start":"2026-08-18","logs":[]},{"name":"Acid tank waterproofing \u2014 polymer coating","qty":200.0,"unit":"sqm","outputRate":40.0,"resources":1,"start":"2026-08-25","logs":[]},{"name":"Acid tank waterproofing \u2014 acid tile lining","qty":200.0,"unit":"sqm","outputRate":25.0,"resources":1,"start":"2026-08-29","logs":[]},{"name":"smu 2 drain \u2014 pcc","qty":200.0,"unit":"m","outputRate":66.67,"resources":1,"start":"2026-08-12","logs":[{"date":"2026-08-24","qty":40.0}]},{"name":"smu 2 drain \u2014 steel binding","qty":200.0,"unit":"m","outputRate":66.67,"resources":1,"start":"2026-08-13","logs":[{"date":"2026-08-19","qty":50.0},{"date":"2026-08-24","qty":100.0}]},{"name":"smu 2 drain \u2014 raft casting","qty":200.0,"unit":"m","outputRate":40.0,"resources":1,"start":"2026-08-16","logs":[]},{"name":"smu 2 drain \u2014 wall casting","qty":200.0,"unit":"m","outputRate":33.33,"resources":1,"start":"2026-08-20","logs":[]},{"name":"Old shed paving and drain \u2014 drain pcc","qty":30.0,"unit":"m","outputRate":30.0,"resources":1,"start":"2026-08-20","logs":[]},{"name":"Old shed paving and drain \u2014 steel binding","qty":30.0,"unit":"m","outputRate":30.0,"resources":1,"start":"2026-08-21","logs":[{"date":"2026-08-24","qty":30.0}]},{"name":"Old shed paving and drain \u2014 raft casting","qty":30.0,"unit":"m","outputRate":15.0,"resources":1,"start":"2026-08-22","logs":[]},{"name":"Old shed paving and drain \u2014 wall casting","qty":30.0,"unit":"m","outputRate":15.0,"resources":1,"start":"2026-08-25","logs":[]},{"name":"Old shed paving and drain \u2014 Backfilling levelliing and compaction","qty":270.0,"unit":"sqm","outputRate":270.0,"resources":1,"start":"2026-08-27","logs":[]},{"name":"Old shed paving and drain \u2014 floor paving","qty":270.0,"unit":"sqm","outputRate":135.0,"resources":1,"start":"2026-08-28","logs":[]},{"name":"Transformer drain \u2014 brickwork","qty":30.0,"unit":"m","outputRate":6.0,"resources":1,"start":"2026-08-25","logs":[{"date":"2026-08-19","qty":30.0}]},{"name":"Transformer drain \u2014 plaster","qty":30.0,"unit":"m","outputRate":10.0,"resources":1,"start":"2026-08-20","logs":[{"date":"2026-08-24","qty":20.0}]},{"name":"central store washroom \u2014 sanitary utilities fixing","qty":2.0,"unit":"nos","outputRate":1.0,"resources":1,"start":"2026-08-19","logs":[{"date":"2026-08-24","qty":2.0}]},{"name":"central store washroom \u2014 painting","qty":50.0,"unit":"sqm","outputRate":16.67,"resources":1,"start":"2026-08-21","logs":[]},{"name":"labour quarter \u2014 washroom accessories fixing","qty":12.0,"unit":"nos","outputRate":2.0,"resources":1,"start":"2026-08-12","logs":[]},{"name":"labour quarter \u2014 plaster","qty":100.0,"unit":"sqm","outputRate":20.0,"resources":1,"start":"2026-08-15","logs":[{"date":"2026-08-19","qty":90.0},{"date":"2026-08-24","qty":10.0}]},{"name":"Scaffholding shed \u2014 excavation and footing casting","qty":18.0,"unit":"nos","outputRate":6.0,"resources":1,"start":"2026-08-24","logs":[{"date":"2026-08-19","qty":14.0}]},{"name":"Scaffholding shed \u2014 column 1st lift","qty":18.0,"unit":"nos","outputRate":9.0,"resources":1,"start":"2026-08-27","logs":[{"date":"2026-08-19","qty":14.0}]},{"name":"Scaffholding shed \u2014 Beam & column bolting","qty":18.0,"unit":"nos","outputRate":1.64,"resources":1,"start":"2026-08-23","logs":[]},{"name":"Scaffholding shed \u2014 flooring","qty":572.0,"unit":"sqm","outputRate":38.13,"resources":1,"start":"2026-08-30","logs":[]},{"name":"Gate \u2014 beam casting","qty":22.0,"unit":"m","outputRate":4.4,"resources":1,"start":"2026-08-14","logs":[{"date":"2026-08-19","qty":22.0}]},{"name":"gate installation","qty":1.0,"unit":"nos","outputRate":1.0,"resources":1,"start":"2026-08-16","logs":[]},{"name":"labour quarter backside paving \u2014 dressing and levelling","qty":180.0,"unit":"sqm","outputRate":60.0,"resources":1,"start":"2026-08-20","logs":[{"date":"2026-08-19","qty":180.0}]},{"name":"labour quarter backside paving \u2014 Flooring","qty":180.0,"unit":"sqm","outputRate":90.0,"resources":1,"start":"2026-08-23","logs":[{"date":"2026-08-24","qty":70.0}]},{"name":"Galva J Bolt","qty":200.0,"unit":"m","outputRate":40.0,"resources":1,"start":"2026-08-15","logs":[{"date":"2026-08-19","qty":200.0}]}];
+window.importGraphonetSeed = async function(){
+  const already = state.projects.find(p=>p.name===SEED_GRAPHONET_PROJECT.name);
+  if(already){ alert("This schedule has already been imported — check the Projects tab."); state.currentTab="projects"; render(); return; }
+  const id = uid();
+  state.projects.push(Object.assign({id}, SEED_GRAPHONET_PROJECT));
+  const pd = emptyPData();
+  SEED_GRAPHONET_TASKS.forEach(st=>{
+    pd.tasks.push({id:uid(), name:st.name, qty:st.qty, unit:st.unit, outputRate:st.outputRate, resources:st.resources, start:st.start,
+      logs: st.logs.map(l=>({id:uid(), date:l.date, qty:l.qty}))});
+  });
+  state.pdata[id] = pd;
+  await saveProjects();
+  await savePData(id);
+  state.currentTab = "dashboard"; state.currentProjectId = id; state.currentTaskId = null;
+  render();
+};
+
+const STAGE_ORDER_BY_TYPE = {
+  'Building': [
+    {kw:['clearing','site clearance','demolition','marking','layout'], stage:0},
+    {kw:['excavation','earthwork excavation','earth work excavation','earthwork','earth work'], stage:1},
+    {kw:['anti termite','antitermite'], stage:2},
+    {kw:['dlc'], stage:3},
+    {kw:['pcc'], stage:4},
+    {kw:['footing','foundation'], stage:5},
+    {kw:['backfill','back filling','earth filling','filling'], stage:6},
+    {kw:['steel','reinforcement'], stage:7},
+    {kw:['shuttering','formwork','centering'], stage:7},
+    {kw:['plinth beam','column','rcc column'], stage:8},
+    {kw:['brick work','brickwork','brick'], stage:9},
+    {kw:['coping','lintel','roof slab','slab','beam'], stage:10},
+    {kw:['waterproofing'], stage:11},
+    {kw:['plaster'], stage:12},
+    {kw:['flooring','tiling','tile'], stage:13},
+    {kw:['door','window'], stage:14},
+    {kw:['electrical','wiring','conduit'], stage:15},
+    {kw:['plumbing','sanitary'], stage:15},
+    {kw:['paint','white wash','finishing','polish'], stage:16},
+    {kw:['external development'], stage:17},
+  ],
+  'Road / Highway': [
+    {kw:['clearing','site clearance','survey'], stage:0},
+    {kw:['earthwork','embankment','earth work'], stage:1},
+    {kw:['subgrade'], stage:2},
+    {kw:['gsb'], stage:3},
+    {kw:['wmm'], stage:4},
+    {kw:['dlc'], stage:5},
+    {kw:['dbm'], stage:6},
+    {kw:[' bc ','wearing course','bituminous concrete'], stage:7},
+    {kw:['shoulder'], stage:8},
+    {kw:['kerb','curb'], stage:9},
+    {kw:['drain'], stage:10},
+    {kw:['road marking','signage'], stage:11},
+  ],
+  'Boundary Wall (Brick/RCC)': [
+    {kw:['survey','setting out'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['pcc'], stage:2},
+    {kw:['footing','foundation'], stage:3},
+    {kw:['steel','reinforcement'], stage:4},
+    {kw:['shuttering','formwork'], stage:4},
+    {kw:['rcc column','column'], stage:5},
+    {kw:['brick work','brickwork','brick'], stage:6},
+    {kw:['coping'], stage:7},
+    {kw:['plaster'], stage:8},
+    {kw:['paint','white wash'], stage:9},
+    {kw:['gate'], stage:10},
+  ],
+  'Boundary Wall (Precast)': [
+    {kw:['survey','setting out'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['foundation','pcc'], stage:2},
+    {kw:['precast post'], stage:3},
+    {kw:['precast panel','precast'], stage:4},
+    {kw:['coping'], stage:5},
+    {kw:['finishing','paint'], stage:6},
+    {kw:['gate'], stage:7},
+  ],
+  'Retaining Wall (RCC)': [
+    {kw:['survey'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['pcc'], stage:2},
+    {kw:['steel','reinforcement'], stage:3},
+    {kw:['shuttering','formwork'], stage:3},
+    {kw:['base slab'], stage:4},
+    {kw:['stem'], stage:5},
+    {kw:['drainage arrangement'], stage:6},
+    {kw:['backfill','back filling'], stage:7},
+    {kw:['compaction'], stage:8},
+    {kw:['coping'], stage:9},
+    {kw:['finishing','plaster'], stage:10},
+  ],
+  'Drain': [
+    {kw:['survey','setting out'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['bedding','pcc'], stage:2},
+    {kw:['steel','reinforcement'], stage:3},
+    {kw:['shuttering','formwork'], stage:3},
+    {kw:['rcc','brick work','brickwork'], stage:4},
+    {kw:['cover slab'], stage:5},
+    {kw:['plaster','finishing'], stage:6},
+    {kw:['backfill','back filling'], stage:7},
+    {kw:['testing'], stage:8},
+  ],
+  'Box Culvert / Bridge': [
+    {kw:['survey'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['pcc'], stage:2},
+    {kw:['base slab'], stage:3},
+    {kw:['steel','reinforcement'], stage:4},
+    {kw:['shuttering','formwork'], stage:4},
+    {kw:['rcc base'], stage:5},
+    {kw:['rcc wall'], stage:6},
+    {kw:['rcc top slab','top slab'], stage:7},
+    {kw:['waterproofing'], stage:8},
+    {kw:['backfill','back filling'], stage:9},
+    {kw:['road restoration'], stage:10},
+  ],
+  'Pipeline (Water/Sewer)': [
+    {kw:['survey','alignment'], stage:0},
+    {kw:['excavation'], stage:1},
+    {kw:['bedding'], stage:2},
+    {kw:['pipe laying','pipeline'], stage:3},
+    {kw:['jointing'], stage:4},
+    {kw:['testing'], stage:5},
+    {kw:['backfill','back filling'], stage:6},
+    {kw:['compaction'], stage:7},
+    {kw:['surface restoration','road restoration'], stage:8},
+  ],
+};
+// generic fallback — used for 'Other / Custom' and any keyword not matched in a type-specific table
+const STAGE_ORDER_GENERIC = [
+  {kw:['clearing','site clearance','demolition','marking','layout','survey','setting out'], stage:0},
+  {kw:['excavation','earthwork','earth work','embankment','subgrade'], stage:1},
+  {kw:['anti termite','antitermite'], stage:2},
+  {kw:['dlc'], stage:3},
+  {kw:['pcc','bedding'], stage:4},
+  {kw:['footing','foundation','base slab'], stage:5},
+  {kw:['backfill','back filling','earth filling','filling'], stage:6},
+  {kw:['steel','reinforcement'], stage:7},
+  {kw:['shuttering','formwork','centering'], stage:7},
+  {kw:['plinth beam','column','rcc column','stem','rcc wall'], stage:8},
+  {kw:['brick work','brickwork','brick'], stage:9},
+  {kw:['coping','lintel','roof slab','slab','beam','cover slab','top slab'], stage:10},
+  {kw:['wmm','gsb','sub base','sub-base','base course'], stage:11},
+  {kw:['kerb','curb'], stage:12},
+  {kw:['paver block','paver','road'], stage:13},
+  {kw:['pipe laying','pipeline','jointing','testing'], stage:13},
+  {kw:['waterproofing'], stage:14},
+  {kw:['plaster'], stage:15},
+  {kw:['flooring','tiling'], stage:16},
+  {kw:['precast post','precast panel'], stage:16},
+  {kw:['paint','white wash','finishing','polish','compaction'], stage:17},
+  {kw:['gate','external development','road restoration','surface restoration'], stage:18},
+];
+function getStage(itemName, projectType){
+  const n = (itemName||'').toLowerCase();
+  const table = STAGE_ORDER_BY_TYPE[projectType];
+  if(table){ for(const s of table){ if(s.kw.some(k=>n.includes(k))) return s.stage; } }
+  for(const s of STAGE_ORDER_GENERIC){ if(s.kw.some(k=>n.includes(k))) return s.stage; }
+  return 50; // unknown items scheduled after known ones, in BOQ order among themselves
+}
+/* ---- Curing / setting lag (days) before the NEXT dependent trade can start ----
+   Practical site lag, not full 28-day design curing — matches how Primavera/MSP
+   model lag between predecessor-finish and successor-start (FS + lag). Same across
+   project types since it's a material property, not a project-type property. */
+const CURING_LAG = [
+  {kw:['dlc'], lag:1},
+  {kw:['pcc','bedding'], lag:2},
+  {kw:['footing','foundation','rcc column','plinth beam','coping','lintel','roof slab','slab','beam','base slab','stem','rcc wall','top slab'], lag:3},
+  {kw:['brick work','brickwork','brick'], lag:1},
+  {kw:['plaster'], lag:2},
+];
+function getCuringLag(itemName){
+  const n = (itemName||'').toLowerCase();
+  for(const c of CURING_LAG){ if(c.kw.some(k=>n.includes(k))) return c.lag; }
+  return 0;
+}
+function orderedBoqItems(pd, projectType){
+  return (pd.boq||[]).filter(it=>Number(it.qty)>0)
+    .map((it,idx)=>({it, idx, stage:getStage(it.item, projectType)}))
+    .sort((a,b)=> a.stage-b.stage || a.idx-b.idx)
+    .map(x=>x.it);
+}
+
+
+function budgetSummary(pdata){
+  let est=0, act=0;
+  (pdata.boq||[]).forEach(it=>{ est += (Number(it.qty)||0)*(Number(it.rate)||0); act += (Number(it.aqty)||0)*(Number(it.arate)||0); });
+  return {est, act, pct: est>0 ? Math.min(100, Math.round((act/est)*100)) : 0};
+}
+function scheduleSummary(pdata){
+  const tasks = pdata.tasks||[];
+  if(!tasks.length) return {pct:0, delayed:false};
+  let sum=0, behind=0;
+  tasks.forEach(t=>{ const c=taskCalc(t); sum+=c.percent; if(c.statusLabel==='behind') behind++; });
+  return {pct: Math.round(sum/tasks.length), delayed: behind>0};
+}
+
+function gaugeSVG(pct, color){
+  const r=26, c=2*Math.PI*r;
+  const off = c - (Math.min(100,Math.max(0,pct))/100)*c;
+  return `<svg width="64" height="64" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="${r}" stroke="var(--line)" stroke-width="6" fill="none"/>
+    <circle cx="32" cy="32" r="${r}" stroke="${color}" stroke-width="6" fill="none"
+      stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="sidebar">
+      <div class="brand"><div class="brand-mark">SITEBOARD</div><div class="brand-sub">Project Control</div></div>
+      <div class="nav">
+        ${navItem('dashboard','◆','Dashboard')}
+        ${navItem('projects','▦','Projects')}
+        ${navItem('schedule','▬','Schedule')}
+        ${navItem('budget','₹','Budget')}
+        ${navItem('resources','⚙','Resources')}
+        ${navItem('dpr','▤','DPR Log')}
+      </div>
+      <div class="sidebar-foot"><button class="newproj-btn" onclick="openModal('newproject')">+ New Project</button></div>
+    </div>
+    <div class="main">${renderTab()}</div>
+    ${state.modal ? renderModal() : ''}
+  `;
+}
+function navItem(key,icon,label){
+  return `<div class="nav-item ${state.currentTab===key?'active':''}" onclick="setTab('${key}')"><span class="nav-icon">${icon}</span>${label}</div>`;
+}
+window.setTab = function(t){ state.currentTab = t; state.currentTaskId=null; render(); };
+
+function projectSelectorHTML(){
+  if(!state.projects.length) return '';
+  const opts = state.projects.map(p=>`<option value="${p.id}" ${p.id===state.currentProjectId?'selected':''}>${p.name}</option>`).join('');
+  return `<select class="projsel" onchange="selectProject(this.value)"><option value="">Select a project…</option>${opts}</select>`;
+}
+window.selectProject = async function(id){
+  state.currentProjectId = id || null; state.currentTaskId=null;
+  if(id) await loadPData(id);
+  render();
+};
+
+function renderTab(){
+  if(state.currentTab==='dashboard') return renderDashboard();
+  if(state.currentTab==='projects') return renderProjectsTab();
+  if(!state.currentProjectId && ['schedule','budget','resources','dpr'].includes(state.currentTab)){
+    return `<div class="topbar"><div><div class="page-title">${tabTitle()}</div><div class="page-sub">Pick a project to continue</div></div>${projectSelectorHTML()}</div>
+      <div class="empty">Select a project from the dropdown above, or add one first from Projects.</div>`;
+  }
+  if(state.currentTab==='schedule') return state.currentTaskId ? renderTaskDetail() : renderScheduleTab();
+  if(state.currentTab==='budget') return renderBudgetTab();
+  if(state.currentTab==='resources') return renderResourcesTab();
+  if(state.currentTab==='dpr') return renderDprTab();
+  return '';
+}
+function tabTitle(){ return {schedule:'Schedule',budget:'Budget',resources:'Resources',dpr:'DPR Log'}[state.currentTab]||''; }
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  if(!state.projects.length){
+    return `<div class="topbar"><div><div class="page-title">Dashboard</div><div class="page-sub">All projects at a glance</div></div></div>
+      <div class="empty">No projects yet. Click <b>+ New Project</b> to add your first one.</div>`;
+  }
+  const cards = state.projects.map(p=>{
+    const pd = state.pdata[p.id] || emptyPData();
+    const b = budgetSummary(pd), s = scheduleSummary(pd);
+    const over = b.act > b.est;
+    const color = over ? 'var(--warn)' : 'var(--good)';
+    return `<div class="pcard" onclick="openProject('${p.id}')">
+      ${(over || s.delayed) ? '<div class="alert-dot" title="Needs attention"></div>' : ''}
+      <div class="pcard-top">
+        <div><div class="pcard-name">${esc(p.name)}</div><div class="pcard-loc">${esc(p.location||'—')}</div></div>
+        <div class="status-pill status-${statusClass(p.status)}">${p.status}</div>
+      </div>
+      <div class="pcard-mid">
+        <div class="gauge">${gaugeSVG(b.pct,color)}<div class="gauge-label">${b.pct}%</div></div>
+        <div class="pcard-stats">
+          <div class="stat-row"><span>Contract value</span><b>${fmtINR(p.value)}</b></div>
+          <div class="stat-row"><span>Spent</span><b class="${over?'row-neg':''}">${fmtINR(b.act)}</b></div>
+          <div class="stat-row"><span>Schedule</span><b>${s.pct}% ${s.delayed?'<span style="color:var(--warn)">(lag)</span>':''}</b></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="topbar"><div><div class="page-title">Dashboard</div><div class="page-sub">${state.projects.length} project(s) under control</div></div></div>
+    <div class="grid">${cards}</div>`;
+}
+function statusClass(s){ return s==='Active'?'active':(s==='On Hold'?'hold':'done'); }
+window.openProject = async function(id){
+  state.currentProjectId = id; await loadPData(id); state.currentTab = 'schedule'; state.currentTaskId=null; render();
+};
+
+/* ---------------- Projects ---------------- */
+function renderProjectsTab(){
+  const rows = state.projects.map(p=>`
+    <tr>
+      <td>${esc(p.name)}</td><td>${esc(p.projectType||'Building')}</td><td>${esc(p.location||'—')}</td><td class="num">${fmtINR(p.value)}</td>
+      <td>${p.startDate||'—'} → ${p.endDate||'—'}</td>
+      <td><span class="status-pill status-${statusClass(p.status)}">${p.status}</span></td>
+      <td style="white-space:nowrap"><button class="btn-ghost btn btn-sm" onclick="openEditProject('${p.id}')">Edit</button> <button class="btn-del" onclick="deleteProject('${p.id}')">Remove</button></td>
+    </tr>`).join('');
+  return `<div class="topbar"><div><div class="page-title">Projects</div><div class="page-sub">All your projects in one place</div></div>
+      <div style="display:flex;gap:8px"><button class="btn" onclick="openModal('newproject')">+ New Project</button></div></div>
+    ${state.projects.length ? `<table><thead><tr><th>Name</th><th>Type</th><th>Location</th><th class="num">Value</th><th>Duration</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No projects yet.</div>'}`;
+}
+window.deleteProject = async function(id){
+  state.projects = state.projects.filter(p=>p.id!==id); delete state.pdata[id];
+  if(state.currentProjectId===id){ state.currentProjectId=null; state.currentTaskId=null; }
+  await saveProjects(); render();
+};
+window.openEditProject = function(id){ state.modal = {type:'editproject', projectId:id}; render(); };
+window.saveEditProject = async function(id){
+  const p = state.projects.find(x=>x.id===id);
+  const name = document.getElementById('ep_name').value.trim();
+  if(!name) return alert('Project name is required.');
+  let value = Number(document.getElementById('ep_val').value)||0;
+  p.name = name;
+  p.projectType = document.getElementById('ep_type').value;
+  p.location = document.getElementById('ep_loc').value.trim();
+  p.value = value;
+  p.startDate = document.getElementById('ep_start').value;
+  p.endDate = document.getElementById('ep_end').value;
+  p.status = document.getElementById('ep_status').value;
+  await saveProjects();
+  state.modal = null;
+  render();
+};
+
+/* ---------------- Schedule (activity list) ---------------- */
+function todayTargetInfo(t,c){
+  if(c.remainingQty<=0) return '';
+  if(new Date(t.start) > new Date()) return `<span style="color:var(--ink-faint)">Not started yet</span>`;
+  const today = isoDate(new Date());
+  const log = (t.logs||[]).find(l=>l.date===today);
+  if(!log) return `<span style="color:var(--warn)">Today's target not logged (${c.dailyTarget} ${esc(t.unit)} due)</span>`;
+  const met = Number(log.qty) >= c.dailyTarget - 0.001;
+  return met
+    ? `<span style="color:var(--good)">✓ Today's target met — ${log.qty}/${c.dailyTarget} ${esc(t.unit)}</span>`
+    : `<span style="color:var(--warn)">✗ Today's target missed — ${log.qty}/${c.dailyTarget} ${esc(t.unit)}</span>`;
+}
+function renderScheduleTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const tasks = pd.tasks||[];
+  let minS=null,maxE=null;
+  const calcs = tasks.map(t=>({t, c:taskCalc(t)}));
+  calcs.forEach(({t,c})=>{ const s=new Date(t.start); const e=c.projectedEnd||c.plannedEnd;
+    if(!minS||s<minS) minS=s; if(!maxE||e>maxE) maxE=e; });
+  const span = (minS&&maxE) ? Math.max(1,(maxE-minS)/86400000) : 1;
+  const rows = calcs.map(({t,c})=>{
+    const s=new Date(t.start);
+    const barEnd = c.projectedEnd || c.plannedEnd;
+    const left = minS ? ((s-minS)/86400000/span)*100 : 0;
+    const width = Math.max(2, ((barEnd-s)/86400000/span)*100);
+    const barClass = c.statusLabel==='ahead' && c.remainingQty<=0 ? 'done' : (c.statusLabel==='behind' ? 'overdue' : '');
+    const cpBadge = t.critical ? `<span title="Critical path — a delay here pushes back the whole project" style="font-size:9px;font-weight:700;color:#fff;background:var(--warn,#c0392b);border-radius:3px;padding:1px 4px;margin-left:6px;vertical-align:middle;">CP</span>`
+      : (t.floatDays>0 ? `<span style="font-size:9px;color:var(--ink-faint);margin-left:6px;">float ${t.floatDays}d</span>` : '');
+    return `<div class="gantt-row" onclick="openTask('${t.id}')">
+      <div class="gr-top">
+        <span class="task-name">${esc(t.name)}${cpBadge}</span>
+        <span class="badge ${c.statusLabel}">${c.statusText}</span>
+      </div>
+      <div class="gr-meta">
+        <span>${fmtDate(t.start)} → ${fmtDate(barEnd)}${c.projectedEnd && c.projectedEnd>c.plannedEnd ? ' <span style="color:var(--warn)">(planned '+fmtDate(c.plannedEnd)+')</span>' : ''}</span>
+        <span>·</span><span>${todayTargetInfo(t,c)}</span>
+      </div>
+      <div class="gantt-track"><div class="gantt-bar ${barClass}" style="left:${left}%;width:${width}%${t.critical?';outline:1.5px solid var(--warn,#c0392b)':''}"></div></div>
+      <div class="gr-foot"><span class="pct">${c.percent}% done — ${c.cumDone}/${t.qty} ${esc(t.unit)}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="topbar"><div><div class="page-title">Schedule — ${esc(p.name)}</div><div class="page-sub">${tasks.length} activities · click one to plan &amp; log daily progress</div></div>${projectSelectorHTML()}</div>
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Add activity</b></div>
+      <div class="form-grid">
+        <div><label>Activity name</label><input id="t_name" placeholder="e.g. RCC Column Casting"/></div>
+        <div><label>Total quantity</label><input id="t_qty" type="number" placeholder="e.g. 120"/></div>
+        <div><label>Unit</label><input id="t_unit" placeholder="cum / sqm / nos"/></div>
+        <div><label>Output / resource / day</label><input id="t_orate" type="number" placeholder="e.g. 2"/></div>
+        <div><label>Resources deployed</label><input id="t_res" type="number" placeholder="e.g. 6"/></div>
+        <div><label>Start date</label><input id="t_start" type="date"/></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px">Duration and daily target are calculated automatically: qty ÷ (output rate × resources).</div>
+      <div style="margin-top:12px"><button class="btn" onclick="addTask()">Add to schedule</button></div>
+    </div>
+    ${tasks.length ? `<div class="section-title">Timeline</div>
+      ${rows}` : '<div class="empty">No activities yet — add the first one above.</div>'}`;
+}
+window.addTask = async function(){
+  const name = document.getElementById('t_name').value.trim();
+  const qty = document.getElementById('t_qty').value;
+  const unit = document.getElementById('t_unit').value.trim();
+  const outputRate = document.getElementById('t_orate').value;
+  const resources = document.getElementById('t_res').value;
+  const start = document.getElementById('t_start').value;
+  if(!name || !qty || !unit || !outputRate || !resources || !start) return alert('All fields are required — qty, unit, output rate, resources, start date.');
+  const pd = state.pdata[state.currentProjectId];
+  pd.tasks.push({id:uid(), name, qty, unit, outputRate, resources, start, logs:[]});
+  await savePData(state.currentProjectId);
+  render();
+};
+window.deleteTaskFromList = async function(id){
+  const pd = state.pdata[state.currentProjectId];
+  pd.tasks = pd.tasks.filter(t=>t.id!==id);
+  await savePData(state.currentProjectId);
+  render();
+};
+window.openTask = function(id){ state.currentTaskId = id; state.planEditOpen=false; render(); };
+window.backToSchedule = function(){ state.currentTaskId = null; state.planEditOpen=false; render(); };
+window.savePlanEdit = async function(taskId){
+  const pd = state.pdata[state.currentProjectId];
+  const t = pd.tasks.find(x=>x.id===taskId);
+  const qty = document.getElementById('pe_qty').value;
+  const unit = document.getElementById('pe_unit').value.trim();
+  const outputRate = document.getElementById('pe_orate').value;
+  const resources = document.getElementById('pe_res').value;
+  const start = document.getElementById('pe_start').value;
+  if(!qty || !unit || !outputRate || !resources || !start) return alert('All fields are required.');
+  t.qty = qty; t.unit = unit; t.outputRate = outputRate; t.resources = resources; t.start = start;
+  await savePData(state.currentProjectId);
+  state.planEditOpen = false;
+  render();
+};
+
+/* ---------------- Task detail (planning + daily log) ---------------- */
+function renderTaskDetail(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const t = pd.tasks.find(x=>x.id===state.currentTaskId);
+  if(!t){ state.currentTaskId=null; return renderScheduleTab(); }
+  const c = taskCalc(t);
+  const logs = (t.logs||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
+
+  const logRows = logs.map(l=>`<tr>
+      <td>${fmtDate(l.date)}</td><td class="num">${l.qty} ${esc(t.unit)}</td>
+      <td><button class="btn-del" onclick="deleteLog('${l.id}')">✕</button></td>
+    </tr>`).join('');
+
+  return `<span class="backlink" onclick="backToSchedule()">← Back to schedule</span>
+    <div class="topbar"><div><div class="page-title">${esc(t.name)} <span class="badge ${c.statusLabel}">${c.statusText}</span></div>
+      <div class="page-sub">${t.qty} ${esc(t.unit)} · started ${fmtDate(t.start)}</div></div>
+      <button class="btn-del" onclick="deleteTaskFromList('${t.id}'); backToSchedule();">Remove activity</button>
+    </div>
+
+    <div class="card">
+      <div class="toolbar"><div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Plan</div>
+        <button class="btn-ghost btn btn-sm" onclick="state.planEditOpen=${state.planEditOpen?'false':'true'};render()">${state.planEditOpen?'Cancel':'Edit'}</button></div>
+      ${state.planEditOpen ? `
+      <div class="form-grid">
+        <div><label>Total quantity</label><input id="pe_qty" type="number" value="${t.qty}"/></div>
+        <div><label>Unit</label><input id="pe_unit" value="${esc(t.unit)}"/></div>
+        <div><label>Output / resource / day</label><input id="pe_orate" type="number" value="${t.outputRate}"/></div>
+        <div><label>Resources deployed</label><input id="pe_res" type="number" value="${t.resources}"/></div>
+        <div><label>Start date</label><input id="pe_start" type="date" value="${t.start}"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" onclick="savePlanEdit('${t.id}')">Save changes</button></div>
+      ` : `
+      <div class="stat-grid">
+        <div class="stat-box"><div class="k">Daily target</div><div class="v">${c.dailyTarget} ${esc(t.unit)}/day</div></div>
+        <div class="stat-box"><div class="k">Planned duration</div><div class="v">${c.plannedDays} days</div></div>
+        <div class="stat-box"><div class="k">Planned finish</div><div class="v">${fmtDate(c.plannedEnd)}</div></div>
+        <div class="stat-box"><div class="k">Resources</div><div class="v">${t.resources} × ${t.outputRate}/day</div></div>
+      </div>
+      `}
+    </div>
+
+    <div class="card">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Actual progress</div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="k">Done so far</div><div class="v">${c.cumDone} / ${t.qty} ${esc(t.unit)}</div></div>
+        <div class="stat-box"><div class="k">% Complete</div><div class="v">${c.percent}%</div></div>
+        <div class="stat-box"><div class="k">Should be by today</div><div class="v">${Math.round(c.targetCumToday*10)/10} ${esc(t.unit)}</div></div>
+        <div class="stat-box"><div class="k">Variance</div><div class="v ${c.variance<0?'warn':(c.variance>0?'good':'')}">${c.variance>=0?'+':''}${Math.round(c.variance*10)/10} ${esc(t.unit)}</div></div>
+      </div>
+      ${c.remainingQty>0 ? `<div class="stat-grid" style="margin-top:10px">
+        <div class="stat-box"><div class="k">Remaining</div><div class="v">${Math.round(c.remainingQty*10)/10} ${esc(t.unit)}</div></div>
+        <div class="stat-box"><div class="k">Your actual pace</div><div class="v">${Math.round(c.actualRate*10)/10} ${esc(t.unit)}/day</div></div>
+        <div class="stat-box"><div class="k">Projected finish (at this pace)</div><div class="v ${c.projectedEnd && c.projectedEnd>c.plannedEnd?'warn':'good'}">${fmtDate(c.projectedEnd)}</div></div>
+        <div class="stat-box"><div class="k">To still hit planned date</div><div class="v">${c.catchUpDaily!=null ? c.catchUpDaily+' '+esc(t.unit)+'/day' : '—'}</div></div>
+      </div>` : `<div style="margin-top:10px;color:var(--good);font-size:13px;font-weight:600;">✓ Activity complete.</div>`}
+    </div>
+
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Log today's work</b></div>
+      <div class="form-grid">
+        <div><label>Date</label><input id="l_date" type="date"/></div>
+        <div><label>Quantity done (${esc(t.unit)})</label><input id="l_qty" type="number"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" onclick="addLog('${t.id}')">Save entry</button></div>
+    </div>
+
+    ${logs.length ? `<div class="section-title">Daily log</div>
+      <table><thead><tr><th>Date</th><th class="num">Qty done</th><th></th></tr></thead><tbody>${logRows}</tbody></table>`
+      : '<div class="empty">No daily entries yet — log today\'s progress above.</div>'}`;
+}
+window.addLog = async function(taskId){
+  const date = document.getElementById('l_date').value;
+  const qty = document.getElementById('l_qty').value;
+  if(!date || !qty) return alert('Both date and quantity are required.');
+  const pd = state.pdata[state.currentProjectId];
+  const t = pd.tasks.find(x=>x.id===taskId);
+  const existing = t.logs.find(l=>l.date===date);
+  if(existing){ existing.qty = qty; } else { t.logs.push({id:uid(), date, qty}); }
+  await savePData(state.currentProjectId);
+  render();
+};
+window.deleteLog = async function(logId){
+  const pd = state.pdata[state.currentProjectId];
+  const t = pd.tasks.find(x=>x.id===state.currentTaskId);
+  t.logs = t.logs.filter(l=>l.id!==logId);
+  await savePData(state.currentProjectId);
+  render();
+};
+
+/* ---------------- Budget (BOQ) ---------------- */
+function renderBudgetTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const items = pd.boq||[];
+  let totEst=0, totAct=0;
+  const rows = items.map(it=>{
+    const est = (Number(it.qty)||0)*(Number(it.rate)||0);
+    const act = (Number(it.aqty)||0)*(Number(it.arate)||0);
+    totEst+=est; totAct+=act;
+    const variance = est-act;
+    return `<tr>
+      <td>${esc(it.item)}</td><td>${esc(it.unit)}</td>
+      <td class="num">${it.qty}</td><td class="num">${fmtINR(it.rate)}</td>
+      <td class="num">${fmtINR(est)}</td><td class="num">${fmtINR(act)}</td>
+      <td class="num ${variance<0?'row-neg':'row-pos'}">${fmtINR(variance)}</td>
+      <td><button class="btn-del" onclick="deleteBoq('${it.id}')">✕</button></td>
+    </tr>`;
+  }).join('');
+  const overCap = p.value && totEst > Number(p.value);
+  return `<div class="topbar"><div><div class="page-title">Budget — ${esc(p.name)}</div><div class="page-sub">Contract value ${fmtINR(p.value)}${overCap?' — <span style="color:var(--warn)">BOQ exceeds contract value</span>':''}</div></div>${projectSelectorHTML()}</div>
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Add BOQ item</b></div>
+      <div class="form-grid">
+        <div><label>Item description</label><input id="b_item" placeholder="e.g. RCC M25 footing"/></div>
+        <div><label>Unit</label><input id="b_unit" placeholder="cum / sqm / nos"/></div>
+        <div><label>Est. Qty</label><input id="b_qty" type="number"/></div>
+        <div><label>Est. Rate (₹)</label><input id="b_rate" type="number"/></div>
+        <div><label>Actual Qty (so far)</label><input id="b_aqty" type="number" value="0"/></div>
+        <div><label>Actual Rate (₹)</label><input id="b_arate" type="number" value="0"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" onclick="addBoq()">Add BOQ item</button></div>
+    </div>
+    ${items.length ? `<div style="margin-bottom:14px"><button class="btn btn-sm" onclick="openPlanModal()">⚡ Auto-plan schedule from BOQ</button></div>` : ''}
+    ${items.length ? `<table><thead><tr><th>Item</th><th>Unit</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Estimated</th><th class="num">Actual</th><th class="num">Variance</th><th></th></tr></thead>
+      <tbody>${rows}<tr class="totrow"><td colspan="4">TOTAL</td><td class="num">${fmtINR(totEst)}</td><td class="num">${fmtINR(totAct)}</td><td class="num">${fmtINR(totEst-totAct)}</td><td></td></tr></tbody></table>`
+      : '<div class="empty">No BOQ items yet — add the first one above.</div>'}`;
+}
+window.addBoq = async function(){
+  const item = document.getElementById('b_item').value.trim();
+  const unit = document.getElementById('b_unit').value.trim();
+  const qty = document.getElementById('b_qty').value;
+  const rate = document.getElementById('b_rate').value;
+  const aqty = document.getElementById('b_aqty').value;
+  const arate = document.getElementById('b_arate').value;
+  if(!item || !unit || !qty || !rate) return alert('Item, unit, qty and rate are required.');
+  const pd = state.pdata[state.currentProjectId];
+  pd.boq.push({id:uid(), item, unit, qty, rate, aqty:aqty||0, arate:arate||0});
+  await savePData(state.currentProjectId);
+  render();
+};
+window.deleteBoq = async function(id){
+  const pd = state.pdata[state.currentProjectId];
+  pd.boq = pd.boq.filter(i=>i.id!==id);
+  await savePData(state.currentProjectId);
+  render();
+};
+
+/* ---------------- Resources ---------------- */
+function renderResourcesTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const items = (pd.resources||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+  const rows = items.map(r=>`<tr>
+    <td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${esc(r.desc)}</td>
+    <td class="num">${r.qty} ${esc(r.unit||'')}</td>
+    <td><button class="btn-del" onclick="deleteResource('${r.id}')">✕</button></td>
+  </tr>`).join('');
+  return `<div class="topbar"><div><div class="page-title">Resources — ${esc(p.name)}</div><div class="page-sub">Labour, equipment &amp; material log</div></div>${projectSelectorHTML()}</div>
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Log entry</b></div>
+      <div class="form-grid">
+        <div><label>Date</label><input id="r_date" type="date"/></div>
+        <div><label>Type</label><select id="r_type">${RES_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+        <div><label>Description</label><input id="r_desc" placeholder="e.g. Mason, JCB, Cement bags"/></div>
+        <div><label>Qty</label><input id="r_qty" type="number"/></div>
+        <div><label>Unit</label><input id="r_unit" placeholder="nos / hrs / bags"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" onclick="addResource()">Add entry</button></div>
+    </div>
+    ${items.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="num">Qty</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No resource entries yet.</div>'}`;
+}
+window.addResource = async function(){
+  const date = document.getElementById('r_date').value;
+  const type = document.getElementById('r_type').value;
+  const desc = document.getElementById('r_desc').value.trim();
+  const qty = document.getElementById('r_qty').value;
+  const unit = document.getElementById('r_unit').value.trim();
+  if(!date || !desc || !qty) return alert('Date, description and qty are required.');
+  const pd = state.pdata[state.currentProjectId];
+  pd.resources.push({id:uid(), date, type, desc, qty, unit});
+  await savePData(state.currentProjectId);
+  render();
+};
+window.deleteResource = async function(id){
+  const pd = state.pdata[state.currentProjectId];
+  pd.resources = pd.resources.filter(r=>r.id!==id);
+  await savePData(state.currentProjectId);
+  render();
+};
+
+/* ---------------- DPR Log ---------------- */
+function renderDprTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const items = (pd.dpr||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+  const rows = items.map(d=>`<tr>
+    <td>${fmtDate(d.date)}</td><td class="num">${d.labour}</td><td class="num">${d.equipHours}</td>
+    <td>${esc(d.note)}</td><td>${esc(d.issues||'—')}</td>
+    <td><button class="btn-del" onclick="deleteDpr('${d.id}')">✕</button></td>
+  </tr>`).join('');
+
+  const today = isoDate(new Date());
+  const activeTasks = (pd.tasks||[]).map(t=>({t,c:taskCalc(t)})).filter(({t,c})=>c.remainingQty>0 && new Date(t.start)<=new Date());
+  const targetRows = activeTasks.map(({t,c})=>{
+    const todaysLog = (t.logs||[]).find(l=>l.date===today);
+    const behind = c.statusLabel==='behind';
+    return `<tr>
+      <td>${esc(t.name)}${behind?' <span class="badge behind" style="font-size:9px">behind</span>':''}</td>
+      <td class="num">${c.dailyTarget} ${esc(t.unit)}/day</td>
+      <td class="num">${Math.round(c.targetCumToday*10)/10} ${esc(t.unit)}</td>
+      <td class="num">${c.cumDone} ${esc(t.unit)}</td>
+      <td><input id="q_${t.id}" type="number" style="width:70px" placeholder="today's qty" value="${todaysLog?todaysLog.qty:''}"/></td>
+      <td><button class="btn btn-sm" onclick="saveQuickLog('${t.id}')">Save</button></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="topbar"><div><div class="page-title">DPR Log — ${esc(p.name)}</div><div class="page-sub">Daily progress record</div></div>${projectSelectorHTML()}</div>
+    ${activeTasks.length ? `<div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Today's targets — currently active work</b></div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">These targets come from Schedule (BOQ auto-plan). Log today's actual quantity right here — the Schedule tab updates automatically.</div>
+      <div style="overflow:auto"><table><thead><tr><th>Activity</th><th class="num">Target/day</th><th class="num">Should be done by today</th><th class="num">Done so far</th><th>Today's actual</th><th></th></tr></thead>
+      <tbody>${targetRows}</tbody></table></div>
+    </div>` : `<div class="card"><div class="empty">No active activity yet — generate a plan from BOQ in the Schedule tab first.</div></div>`}
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Today's entry — overall site summary</b></div>
+      <div class="form-grid">
+        <div><label>Date</label><input id="d_date" type="date"/></div>
+        <div><label>Labour count</label><input id="d_labour" type="number"/></div>
+        <div><label>Equipment hours</label><input id="d_equip" type="number"/></div>
+      </div>
+      <div style="margin-top:10px"><label>Progress note</label><textarea id="d_note" placeholder="Work done today…"></textarea></div>
+      <div style="margin-top:10px"><label>Issues / delays (optional)</label><textarea id="d_issues" placeholder="Any hindrance…"></textarea></div>
+      <div style="margin-top:12px"><button class="btn" onclick="addDpr()">Save DPR entry</button></div>
+    </div>
+    ${items.length ? `<table><thead><tr><th>Date</th><th class="num">Labour</th><th class="num">Equip. hrs</th><th>Progress</th><th>Issues</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No DPR entries yet.</div>'}`;
+}
+window.saveQuickLog = async function(taskId){
+  const el = document.getElementById('q_'+taskId);
+  const val = el ? el.value : '';
+  if(val===''||val==null) return;
+  const pd = state.pdata[state.currentProjectId];
+  const t = pd.tasks.find(x=>x.id===taskId);
+  const date = isoDate(new Date());
+  const existing = t.logs.find(l=>l.date===date);
+  if(existing){ existing.qty = val; } else { t.logs.push({id:uid(), date, qty:val}); }
+  await savePData(state.currentProjectId);
+  render();
+};
+window.addDpr = async function(){
+  const date = document.getElementById('d_date').value;
+  const labour = document.getElementById('d_labour').value;
+  const equipHours = document.getElementById('d_equip').value;
+  const note = document.getElementById('d_note').value.trim();
+  const issues = document.getElementById('d_issues').value.trim();
+  if(!date || !note) return alert('Date and progress note are required.');
+  const pd = state.pdata[state.currentProjectId];
+  pd.dpr.push({id:uid(), date, labour:labour||0, equipHours:equipHours||0, note, issues});
+  await savePData(state.currentProjectId);
+  render();
+};
+window.deleteDpr = async function(id){
+  const pd = state.pdata[state.currentProjectId];
+  pd.dpr = pd.dpr.filter(d=>d.id!==id);
+  await savePData(state.currentProjectId);
+  render();
+};
+
+/* ---------------- Modal: New Project ---------------- */
+window.openModal = function(type){ state.modal = {type}; render(); };
+window.closeModal = function(){ state.modal = null; render(); };
+function renderModal(){
+  if(state.modal.type==='planboq'){ return renderPlanModal(); }
+  if(state.modal.type==='editproject'){
+    const p = state.projects.find(x=>x.id===state.modal.projectId);
+    if(!p){ state.modal=null; return ''; }
+    return `<div class="modal-back" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Edit Project</h3>
+        <div><label>Project name</label><input id="ep_name" value="${esc(p.name)}"/></div>
+        <div style="margin-top:10px"><label>Project type</label><select id="ep_type">${PROJECT_TYPES.map(t=>`<option ${t===p.projectType?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div class="form-grid" style="margin-top:10px">
+          <div><label>Location</label><input id="ep_loc" value="${esc(p.location||'')}"/></div>
+          <div><label>Contract value (₹)</label><input id="ep_val" type="number" value="${p.value||0}"/></div>
+          <div><label>Start date</label><input id="ep_start" type="date" value="${p.startDate||''}"/></div>
+          <div><label>End date</label><input id="ep_end" type="date" value="${p.endDate||''}"/></div>
+        </div>
+        <div style="margin-top:10px"><label>Status</label><select id="ep_status">${STATUS_OPTS.map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="modal-actions">
+          <button class="btn-ghost btn" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="saveEditProject('${p.id}')">Save changes</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if(state.modal.type==='newproject'){
+    return `<div class="modal-back" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>New Project</h3>
+        <div><label>Project name</label><input id="np_name" placeholder="e.g. Boundary Wall — Sector 12"/></div>
+        <div style="margin-top:10px"><label>Project type</label><select id="np_type">${PROJECT_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">This makes BOQ auto-plan use the correct construction sequence (e.g. GSB→WMM→DBM→BC for Road, or Excavation→PCC→Column→Brickwork for Boundary Wall).</div></div>
+        <div class="form-grid" style="margin-top:10px">
+          <div><label>Location</label><input id="np_loc" placeholder="City / State"/></div>
+          <div><label>Contract value (₹)</label><input id="np_val" type="number" placeholder="e.g. 15000000"/></div>
+          <div><label>Start date</label><input id="np_start" type="date"/></div>
+          <div><label>End date</label><input id="np_end" type="date"/></div>
+        </div>
+        <div style="margin-top:10px"><label>Status</label><select id="np_status">${STATUS_OPTS.map(s=>`<option>${s}</option>`).join('')}</select></div>
+        <div class="modal-actions">
+          <button class="btn-ghost btn" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="createProject()">Create project</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+/* ---------------- Modal: Auto-plan schedule from BOQ ---------------- */
+function currentProjectType(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  return (p && p.projectType) || 'Building';
+}
+function initPlanDraft(items){
+  state.planDraft = {};
+  items.forEach(it=>{ state.planDraft[it.id] = guessOutputRate(it.item, it.unit); });
+  if(!state.planStart) state.planStart = isoDate(new Date());
+  if(!state.planMode) state.planMode = 'sequential';
+}
+function planDays(it,d){
+  const qty=Number(it.qty)||0, target=(Number(d.outputRate)||0)*(Number(d.resources)||0);
+  return target>0 ? Math.ceil(qty/target) : '—';
+}
+window.openPlanModal = function(){
+  const pd = state.pdata[state.currentProjectId];
+  const items = orderedBoqItems(pd, currentProjectType());
+  if(!items.length) return alert('Add BOQ items with quantity first.');
+  initPlanDraft(items);
+  state.modal = {type:'planboq'};
+  render();
+};
+window.updatePlanDraft = function(id, key, val){
+  state.planDraft[id][key] = Number(val)||0; render();
+};
+function renderPlanModal(){
+  const pd = state.pdata[state.currentProjectId];
+  const ptype = currentProjectType();
+  const items = orderedBoqItems(pd, ptype); // construction-sequence order, not upload order
+  if(!state.planDraft) initPlanDraft(items);
+  const rows = items.map((it,i)=>{
+    const d = state.planDraft[it.id];
+    return `<tr>
+      <td class="num" style="color:var(--ink-soft)">${i+1}</td>
+      <td>${esc(it.item)}</td>
+      <td class="num">${it.qty} ${esc(it.unit)}</td>
+      <td><input type="number" style="width:64px" value="${d.outputRate}" onchange="updatePlanDraft('${it.id}','outputRate',this.value)"/></td>
+      <td><input type="number" style="width:54px" value="${d.resources}" onchange="updatePlanDraft('${it.id}','resources',this.value)"/></td>
+      <td class="num">${planDays(it,d)} d</td>
+    </tr>`;
+  }).join('');
+  return `<div class="modal-back" onclick="if(event.target===this)closeModal()">
+    <div class="modal" style="width:600px">
+      <h3>Auto-plan schedule from BOQ <span style="font-size:11px;color:var(--ink-soft);font-weight:500;">— ${esc(ptype)}</span></h3>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">The correct construction sequence for this project type (${esc(ptype)}) has been applied, curing/setting lag has been added after concrete/masonry items, and activities that directly drive the project finish date get a <b>CP</b> (Critical Path) tag in the Schedule tab. Output rate/resources are estimates — edit as needed.</div>
+      <div class="form-grid">
+        <div><label>Project start date</label><input type="date" value="${state.planStart}" onchange="state.planStart=this.value;render()"/></div>
+        <div><label>Scheduling mode</label><select onchange="state.planMode=this.value;render()">
+          <option value="sequential" ${state.planMode==='sequential'?'selected':''}>Sequential (ek activity ek baad ek — single crew)</option>
+          <option value="stage" ${state.planMode==='stage'?'selected':''}>Stage-wise (same-stage work in parallel, separate crews)</option>
+        </select></div>
+      </div>
+      <div style="max-height:280px;overflow:auto;margin-top:12px">
+        <table><thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Output/day</th><th>Resources</th><th class="num">Days</th></tr></thead><tbody>${rows}</tbody></table>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost btn" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="generatePlanFromBoq()">Generate schedule</button>
+      </div>
+    </div>
+  </div>`;
+}
+window.generatePlanFromBoq = async function(){
+  const pd = state.pdata[state.currentProjectId];
+  const ptype = currentProjectType();
+  const items = orderedBoqItems(pd, ptype); // already in construction-sequence order
+
+  // group consecutive same-stage items together (needed for stage-wise mode + float calc)
+  const groups = [];
+  items.forEach(it=>{
+    const st = getStage(it.item, ptype);
+    const last = groups[groups.length-1];
+    if(!last || last.stage!==st) groups.push({stage:st, items:[it]});
+    else last.items.push(it);
+  });
+
+  let cursor = new Date(state.planStart);
+  const results = []; // {it, d, days, startDate, critical, floatDays}
+
+  if(state.planMode==='stage'){
+    groups.forEach(g=>{
+      const groupStart = new Date(cursor);
+      let groupEnd = new Date(groupStart);
+      const rowsG = g.items.map(it=>{
+        const d = state.planDraft[it.id];
+        const target = (Number(d.outputRate)||0)*(Number(d.resources)||0);
+        const days = target>0 ? Math.ceil((Number(it.qty)||0)/target) : 1;
+        const end = new Date(groupStart); end.setDate(end.getDate()+days);
+        if(end>groupEnd) groupEnd = end;
+        return {it, d, days, startDate:groupStart, end};
+      });
+      rowsG.forEach(r=>{
+        const floatDays = Math.round((groupEnd - r.end)/86400000);
+        results.push({it:r.it, d:r.d, startDate:r.startDate, floatDays, critical: floatDays===0});
+      });
+      const maxLag = Math.max(0, ...g.items.map(it=>getCuringLag(it.item)));
+      cursor = new Date(groupEnd); cursor.setDate(cursor.getDate()+maxLag);
+    });
+  } else {
+    // fully sequential — one activity strictly after the previous one (+ curing lag)
+    items.forEach(it=>{
+      const d = state.planDraft[it.id];
+      const target = (Number(d.outputRate)||0)*(Number(d.resources)||0);
+      const days = target>0 ? Math.ceil((Number(it.qty)||0)/target) : 1;
+      const startDate = new Date(cursor);
+      const end = new Date(startDate); end.setDate(end.getDate()+days);
+      const lag = getCuringLag(it.item);
+      cursor = new Date(end); cursor.setDate(cursor.getDate()+lag);
+      results.push({it, d, startDate, floatDays:0, critical:true});
+    });
+  }
+
+  results.forEach(({it, d, startDate, floatDays, critical})=>{
+    const startIso = isoDate(startDate);
+    const existing = pd.tasks.find(t=>t.boqId===it.id);
+    if(existing){
+      existing.name=it.item; existing.qty=it.qty; existing.unit=it.unit;
+      existing.outputRate=d.outputRate; existing.resources=d.resources; existing.start=startIso;
+      existing.critical=critical; existing.floatDays=floatDays;
+    } else {
+      pd.tasks.push({id:uid(), boqId:it.id, name:it.item, qty:it.qty, unit:it.unit,
+        outputRate:d.outputRate, resources:d.resources, start:startIso, logs:[],
+        critical, floatDays});
+    }
+  });
+  await savePData(state.currentProjectId);
+  state.modal = null; state.planDraft = null;
+  state.currentTab = 'schedule';
+  render();
+};
+
+window.createProject = async function(){
+  const name = document.getElementById('np_name').value.trim();
+  const projectType = document.getElementById('np_type').value;
+  const location = document.getElementById('np_loc').value.trim();
+  let value = Number(document.getElementById('np_val').value)||0;
+  const startDate = document.getElementById('np_start').value;
+  const endDate = document.getElementById('np_end').value;
+  const status = document.getElementById('np_status').value;
+  if(!name) return alert('Project name is required.');
+  const id = uid();
+  state.projects.push({id, name, projectType, location, value, startDate, endDate, status});
+  state.pdata[id] = emptyPData();
+  await saveProjects();
+  await savePData(id);
+  state.modal = null;
+  render();
+};
+
+function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async function boot(){
+  document.getElementById('app').innerHTML = '<div style="padding:40px;font-family:var(--font-body);color:var(--ink-soft)">Loading…</div>';
+  if(!HAS_ARTIFACT_STORAGE && !db){
+    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:520px">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:10px">⚠ Can't connect to Firebase</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">This usually means either the internet connection dropped while loading the Firebase SDK, or the config in FIREBASE_CONFIG hasn't been filled in correctly yet.<br/><br/>
+      Check your internet connection and refresh. If that doesn't help, open the browser's developer console (F12) and look for the exact error message.</div></div>`;
+    return;
+  }
+  await loadProjects();
+  for(const p of state.projects){ await loadPData(p.id); }
+  if(state.projects.length===0){
+    let seeded = false;
+    try{
+      if(HAS_ARTIFACT_STORAGE){
+        const r = await window.storage.get('seeded_v1', false); seeded = !!(r && r.value);
+      } else if(db){
+        const snap = await db.collection('meta').doc('seeded').get(); seeded = snap.exists && snap.data().done;
+      }
+    }catch(e){ seeded = false; }
+    if(!seeded){
+      await importGraphonetSeed();
+      try{
+        if(HAS_ARTIFACT_STORAGE){ await window.storage.set('seeded_v1', '1', false); }
+        else if(db){ await db.collection('meta').doc('seeded').set({done:true}); }
+      }catch(e){}
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
