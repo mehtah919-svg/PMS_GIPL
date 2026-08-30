@@ -178,7 +178,8 @@ let state = {
   currentTaskId: null,
   loaded: false,
   modal: null,
-  planEditOpen: false
+  planEditOpen: false,
+  loadError: null
 };
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -197,22 +198,28 @@ function emptyPData(){ return {tasks:[], boq:[], resources:[], dpr:[]}; }
 
 /* ---- Storage layer — auto-switches between Claude's artifact storage (preview)
    and Firebase Firestore (team-shared, when deployed outside Claude). ---- */
+function withTimeout(promise, ms, label){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error('Timed out waiting for: '+label+' — check that Firestore Database is created (not just the web app registered) in your Firebase project.')), ms))
+  ]);
+}
 async function loadProjects(){
   try{
     if(HAS_ARTIFACT_STORAGE){
       const r = await window.storage.get('projects', false);
       state.projects = r ? JSON.parse(r.value) : [];
     } else if(db){
-      const snap = await db.collection('meta').doc('projects').get();
+      const snap = await withTimeout(db.collection('meta').doc('projects').get(), 6000, 'loadProjects');
       state.projects = snap.exists ? (snap.data().list || []) : [];
     } else { state.projects = []; }
-  }catch(e){ console.error('load projects failed', e); state.projects = []; }
+  }catch(e){ console.error('load projects failed', e); state.projects = []; state.loadError = e.message; }
   state.loaded = true;
 }
 async function saveProjects(){
   try{
     if(HAS_ARTIFACT_STORAGE){ await window.storage.set('projects', JSON.stringify(state.projects), false); }
-    else if(db){ await db.collection('meta').doc('projects').set({list: state.projects}); }
+    else if(db){ await withTimeout(db.collection('meta').doc('projects').set({list: state.projects}), 6000, 'saveProjects'); }
   }catch(e){ console.error('save projects failed', e); }
 }
 async function loadPData(id){
@@ -222,10 +229,10 @@ async function loadPData(id){
       const r = await window.storage.get('pdata:'+id, false);
       state.pdata[id] = r ? JSON.parse(r.value) : emptyPData();
     } else if(db){
-      const snap = await db.collection('pdata').doc(id).get();
+      const snap = await withTimeout(db.collection('pdata').doc(id).get(), 6000, 'loadPData');
       state.pdata[id] = snap.exists ? snap.data() : emptyPData();
     } else { state.pdata[id] = emptyPData(); }
-  }catch(e){ console.error('load pdata failed', e); state.pdata[id] = emptyPData(); }
+  }catch(e){ console.error('load pdata failed', e); state.pdata[id] = emptyPData(); state.loadError = e.message; }
   if(!state.pdata[id].tasks) state.pdata[id].tasks = [];
   if(!state.pdata[id].boq) state.pdata[id].boq = [];
   if(!state.pdata[id].resources) state.pdata[id].resources = [];
@@ -236,7 +243,7 @@ async function loadPData(id){
 async function savePData(id){
   try{
     if(HAS_ARTIFACT_STORAGE){ await window.storage.set('pdata:'+id, JSON.stringify(state.pdata[id]), false); }
-    else if(db){ await db.collection('pdata').doc(id).set(state.pdata[id]); }
+    else if(db){ await withTimeout(db.collection('pdata').doc(id).set(state.pdata[id]), 6000, 'savePData'); }
   }catch(e){ console.error('save pdata failed', e); }
 }
 
@@ -1230,6 +1237,13 @@ function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>
     return;
   }
   await loadProjects();
+  if(state.loadError){
+    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:560px">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:10px">⚠ Couldn't reach the database</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">${esc(state.loadError)}</div>
+      <div style="margin-top:14px"><button class="btn" onclick="location.reload()">Retry</button></div></div>`;
+    return;
+  }
   for(const p of state.projects){ await loadPData(p.id); }
   if(state.projects.length===0){
     let seeded = false;
@@ -1237,16 +1251,23 @@ function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>
       if(HAS_ARTIFACT_STORAGE){
         const r = await window.storage.get('seeded_v1', false); seeded = !!(r && r.value);
       } else if(db){
-        const snap = await db.collection('meta').doc('seeded').get(); seeded = snap.exists && snap.data().done;
+        const snap = await withTimeout(db.collection('meta').doc('seeded').get(), 6000, 'seeded-check'); seeded = snap.exists && snap.data().done;
       }
-    }catch(e){ seeded = false; }
-    if(!seeded){
+    }catch(e){ seeded = false; state.loadError = e.message; }
+    if(!seeded && !state.loadError){
       await importGraphonetSeed();
       try{
         if(HAS_ARTIFACT_STORAGE){ await window.storage.set('seeded_v1', '1', false); }
-        else if(db){ await db.collection('meta').doc('seeded').set({done:true}); }
+        else if(db){ await withTimeout(db.collection('meta').doc('seeded').set({done:true}), 6000, 'seeded-write'); }
       }catch(e){}
     }
+  }
+  if(state.loadError){
+    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:560px">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:10px">⚠ Couldn't reach the database</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">${esc(state.loadError)}</div>
+      <div style="margin-top:14px"><button class="btn" onclick="location.reload()">Retry</button></div></div>`;
+    return;
   }
   render();
 })();
