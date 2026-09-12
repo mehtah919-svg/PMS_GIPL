@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
+<!-- saved from url=(0041)https://mehtah919-svg.github.io/PMS_GIPL/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SITEBOARD — Project Control</title>
 <style>
@@ -139,6 +139,7 @@
      ============================================================ -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCfJORRIuIbcm3nQLFlYGGg5FCZ8qilOGo",
@@ -148,20 +149,27 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "515776941783",
   appId: "1:515776941783:web:030cf850edc960e485aa92"
 };
+// The admin's email — this person is auto-approved and can approve/reject everyone else.
+// CHANGE THIS to your real login email before deploying.
+const ADMIN_EMAIL = "himanshu.m@graphonet.in";
+
 /* Auto-detect where this file is running:
-   - Inside Claude's own preview, window.storage exists — use that (fast local preview, not team-shared).
+   - Inside Claude's own preview, window.storage exists — use that (fast local preview, not team-shared,
+     no login required so testing is easy).
    - Anywhere else (downloaded file, GitHub Pages, etc.) — window.storage doesn't exist, so use
-     Firebase Firestore instead (team-shared, works on any device). No manual switching needed. */
+     Firebase Firestore + Firebase Auth instead (team-shared, login + admin approval required). */
 const HAS_ARTIFACT_STORAGE = (typeof window.storage !== 'undefined');
 let db = null;
+let auth = null;
 if(!HAS_ARTIFACT_STORAGE){
   try{
     if(typeof firebase === 'undefined') throw new Error('Firebase SDK did not load (check your internet connection).');
     firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.firestore();
+    auth = firebase.auth();
   }catch(e){
     console.error('Firebase init failed:', e);
-    db = null;
+    db = null; auth = null;
   }
 }
 </script>
@@ -179,7 +187,14 @@ let state = {
   loaded: false,
   modal: null,
   planEditOpen: false,
-  loadError: null
+  loadError: null,
+  currentUser: null,
+  authView: 'login',
+  authError: null,
+  pendingUsers: [],
+  lastDeleted: null,
+  billingPreselect: null,
+  globalTrash: []
 };
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -194,7 +209,7 @@ function fmtDate(d){
   return dt.toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
 }
 function isoDate(d){ return d.toISOString().slice(0,10); }
-function emptyPData(){ return {tasks:[], boq:[], resources:[], dpr:[]}; }
+function emptyPData(){ return {tasks:[], boq:[], resources:[], dpr:[], billing:[]}; }
 
 /* ---- Storage layer — auto-switches between Claude's artifact storage (preview)
    and Firebase Firestore (team-shared, when deployed outside Claude). ---- */
@@ -207,8 +222,10 @@ function withTimeout(promise, ms, label){
 async function loadProjects(){
   try{
     if(HAS_ARTIFACT_STORAGE){
-      const r = await window.storage.get('projects', false);
-      state.projects = r ? JSON.parse(r.value) : [];
+      try{
+        const r = await window.storage.get('projects', false);
+        state.projects = r ? JSON.parse(r.value) : [];
+      }catch(notFound){ state.projects = []; } // key doesn't exist yet — normal on first load, not an error
     } else if(db){
       const snap = await withTimeout(db.collection('meta').doc('projects').get(), 6000, 'loadProjects');
       state.projects = snap.exists ? (snap.data().list || []) : [];
@@ -222,12 +239,32 @@ async function saveProjects(){
     else if(db){ await withTimeout(db.collection('meta').doc('projects').set({list: state.projects}), 6000, 'saveProjects'); }
   }catch(e){ console.error('save projects failed', e); }
 }
+async function loadGlobalTrash(){
+  try{
+    if(HAS_ARTIFACT_STORAGE){
+      try{ const r = await window.storage.get('global_trash', false); state.globalTrash = r ? JSON.parse(r.value) : []; }
+      catch(notFound){ state.globalTrash = []; }
+    } else if(db){
+      const snap = await withTimeout(db.collection('meta').doc('globalTrash').get(), 6000, 'loadGlobalTrash');
+      state.globalTrash = snap.exists ? (snap.data().items || []) : [];
+    } else { state.globalTrash = []; }
+  }catch(e){ console.error('load global trash failed', e); state.globalTrash = []; }
+  state.globalTrash = state.globalTrash.filter(t=> (Date.now()-new Date(t.deletedAt).getTime()) < TRASH_RETENTION_MS);
+}
+async function saveGlobalTrash(){
+  try{
+    if(HAS_ARTIFACT_STORAGE){ await window.storage.set('global_trash', JSON.stringify(state.globalTrash), false); }
+    else if(db){ await withTimeout(db.collection('meta').doc('globalTrash').set({items: state.globalTrash}), 6000, 'saveGlobalTrash'); }
+  }catch(e){ console.error('save global trash failed', e); }
+}
 async function loadPData(id){
   if(state.pdata[id]) return state.pdata[id];
   try{
     if(HAS_ARTIFACT_STORAGE){
-      const r = await window.storage.get('pdata:'+id, false);
-      state.pdata[id] = r ? JSON.parse(r.value) : emptyPData();
+      try{
+        const r = await window.storage.get('pdata:'+id, false);
+        state.pdata[id] = r ? JSON.parse(r.value) : emptyPData();
+      }catch(notFound){ state.pdata[id] = emptyPData(); } // key doesn't exist yet — normal, not an error
     } else if(db){
       const snap = await withTimeout(db.collection('pdata').doc(id).get(), 6000, 'loadPData');
       state.pdata[id] = snap.exists ? snap.data() : emptyPData();
@@ -237,6 +274,7 @@ async function loadPData(id){
   if(!state.pdata[id].boq) state.pdata[id].boq = [];
   if(!state.pdata[id].resources) state.pdata[id].resources = [];
   if(!state.pdata[id].dpr) state.pdata[id].dpr = [];
+  if(!state.pdata[id].billing) state.pdata[id].billing = [];
   state.pdata[id].tasks.forEach(t=>{ if(!t.logs) t.logs=[]; });
   return state.pdata[id];
 }
@@ -530,6 +568,16 @@ function scheduleSummary(pdata){
   tasks.forEach(t=>{ const c=taskCalc(t); sum+=c.percent; if(c.statusLabel==='behind') behind++; });
   return {pct: Math.round(sum/tasks.length), delayed: behind>0};
 }
+function billingSummary(pdata){
+  let totEst=0, totBilled=0;
+  (pdata.boq||[]).forEach(it=>{
+    const est = (Number(it.qty)||0)*(Number(it.rate)||0);
+    const bs = boqBilledSummary(pdata, it.id);
+    totEst += est;
+    totBilled += bs.qty*(Number(it.rate)||0);
+  });
+  return {totEst, totBilled, pct: totEst>0 ? Math.round((totBilled/totEst)*100) : 0};
+}
 
 function gaugeSVG(pct, color){
   const r=26, c=2*Math.PI*r;
@@ -541,8 +589,241 @@ function gaugeSVG(pct, color){
   </svg>`;
 }
 
+function whoami(){
+  if(HAS_ARTIFACT_STORAGE) return 'You';
+  if(!state.currentUser) return 'Unknown';
+  return state.currentUser.displayName || state.currentUser.email || 'Unknown';
+}
+function canDelete(){
+  return HAS_ARTIFACT_STORAGE || (state.currentUser && state.currentUser.isAdmin);
+}
+function delBtn(onclick){
+  return canDelete() ? `<button class="btn-del" onclick="${onclick}">✕</button>` : '';
+}
+
+/* ---------------- Trash: 7-day recoverable delete history (admin only) ---------------- */
+const TRASH_RETENTION_MS = 7*24*60*60*1000;
+function trashPush(pd, type, data, label){
+  if(!data) return;
+  if(!pd.trash) pd.trash = [];
+  pd.trash.push({id:uid(), type, data, label: label||'Item', deletedAt:new Date().toISOString(), deletedBy:whoami()});
+}
+function purgeOldTrash(pd){
+  if(!pd.trash) return;
+  pd.trash = pd.trash.filter(t=> (Date.now()-new Date(t.deletedAt).getTime()) < TRASH_RETENTION_MS);
+}
+function daysLeft(deletedAt){
+  const ms = TRASH_RETENTION_MS - (Date.now()-new Date(deletedAt).getTime());
+  return Math.max(0, Math.ceil(ms/86400000));
+}
+function restoreTrashData(pd, item){
+  const d = item.data;
+  if(item.type==='boq') pd.boq.push(d);
+  else if(item.type==='task') pd.tasks.push(d);
+  else if(item.type==='log'){ const t = pd.tasks.find(x=>x.id===d.taskId); if(t) t.logs.push(d.log); }
+  else if(item.type==='resource') pd.resources.push(d);
+  else if(item.type==='dpr') pd.dpr.push(d);
+  else if(item.type==='billing') pd.billing.push(d);
+}
+function renderTrashTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  purgeOldTrash(pd);
+  const items = (pd.trash||[]).slice().sort((a,b)=> b.deletedAt.localeCompare(a.deletedAt));
+  const rows = items.map(t=>`<tr>
+    <td>${esc(t.type)}</td><td>${esc(t.label)}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(t.deletedBy)}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${fmtDate(t.deletedAt)}</td>
+    <td class="num">${daysLeft(t.deletedAt)}d left</td>
+    <td><button class="btn btn-sm" onclick="restoreFromTrash('${t.id}')">Restore</button></td>
+  </tr>`).join('');
+  return `<div class="topbar"><div><div class="page-title">Trash — ${esc(p.name)}</div><div class="page-sub">Deleted items stay recoverable for 7 days</div></div>${projectSelectorHTML()}</div>
+    ${items.length ? `<table><thead><tr><th>Type</th><th>Item</th><th>Deleted by</th><th>Deleted on</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Nothing in trash.</div>'}`;
+}
+window.restoreFromTrash = async function(trashId){
+  const pd = state.pdata[state.currentProjectId];
+  const item = pd.trash.find(t=>t.id===trashId);
+  if(!item) return;
+  restoreTrashData(pd, item);
+  pd.trash = pd.trash.filter(t=>t.id!==trashId);
+  await savePData(state.currentProjectId);
+  render();
+};
+
+/* ---------------- Undo (session-only, for accidental deletes) ---------------- */
+function pushUndo(type, projectId, data, restoreFn, label){
+  if(!data) return;
+  const record = {type, projectId, data, restoreFn, label: label || (data.name || data.item || 'Item'), rid: uid()};
+  state.lastDeleted = record;
+  setTimeout(()=>{ if(state.lastDeleted && state.lastDeleted.rid===record.rid){ state.lastDeleted = null; render(); } }, 12000);
+}
+window.undoDelete = async function(){
+  const u = state.lastDeleted;
+  if(!u) return;
+  state.lastDeleted = null;
+  u.restoreFn(u.data);
+  if(u.type==='project'){ await saveProjects(); if(u.data.pdata) await savePData(u.projectId); }
+  else { await savePData(u.projectId); }
+  render();
+};
+function undoBannerHTML(){
+  if(!state.lastDeleted) return '';
+  return `<div class="card" style="background:var(--warn-soft);display:flex;justify-content:space-between;align-items:center;padding:10px 14px;margin-bottom:14px">
+    <span style="font-size:13px">"${esc(state.lastDeleted.label)}" deleted.</span>
+    <button class="btn btn-sm" onclick="undoDelete()">Undo</button>
+  </div>`;
+}
+
+/* ---------------- Auth screens: login / signup / pending / rejected ---------------- */
+function renderAuthScreen(){
+  if(state.authView==='signup') return renderSignupScreen();
+  return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;width:100%">
+    <div class="card" style="width:340px;max-width:90vw">
+      <div class="brand-mark" style="color:var(--ink);font-size:20px;margin-bottom:2px">SITEBOARD</div>
+      <div style="color:var(--ink-soft);font-size:12px;margin-bottom:18px">Sign in to continue</div>
+      ${state.authError ? `<div style="color:var(--warn);font-size:12px;margin-bottom:10px">${esc(state.authError)}</div>` : ''}
+      <label>Email</label><input id="li_email" type="email" placeholder="you@graphonet.com" autocomplete="username"/>
+      <div style="margin-top:10px"><label>Password</label><input id="li_pass" type="password" placeholder="••••••••" autocomplete="current-password"/></div>
+      <div style="margin-top:16px"><button class="btn" style="width:100%" onclick="doLogin()">Log in</button></div>
+      <div style="margin-top:12px;font-size:11.5px;color:var(--ink-soft)">New here? <a href="#" onclick="state.authView='signup';state.authError=null;render();return false;">Create an account</a></div>
+    </div>
+  </div>`;
+}
+function renderSignupScreen(){
+  return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;width:100%">
+    <div class="card" style="width:340px;max-width:90vw">
+      <div class="brand-mark" style="color:var(--ink);font-size:20px;margin-bottom:2px">SITEBOARD</div>
+      <div style="color:var(--ink-soft);font-size:12px;margin-bottom:18px">Create your account</div>
+      ${state.authError ? `<div style="color:var(--warn);font-size:12px;margin-bottom:10px">${esc(state.authError)}</div>` : ''}
+      <label>Your name</label><input id="su_name" placeholder="e.g. Rahul Sharma"/>
+      <div style="margin-top:10px"><label>Email</label><input id="su_email" type="email" placeholder="you@graphonet.com" autocomplete="username"/></div>
+      <div style="margin-top:10px"><label>Password</label><input id="su_pass" type="password" placeholder="At least 6 characters" autocomplete="new-password"/></div>
+      <div style="margin-top:16px"><button class="btn" style="width:100%" onclick="doSignup()">Sign up</button></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--ink-soft)">Your account needs admin approval before you can see project data.</div>
+      <div style="margin-top:12px;font-size:11.5px;color:var(--ink-soft)">Already have an account? <a href="#" onclick="state.authView='login';state.authError=null;render();return false;">Log in</a></div>
+    </div>
+  </div>`;
+}
+window.doLogin = async function(){
+  const email = document.getElementById('li_email').value.trim();
+  const pass = document.getElementById('li_pass').value;
+  state.authError = null;
+  if(!email || !pass){ state.authError='Enter both email and password.'; render(); return; }
+  try{ await auth.signInWithEmailAndPassword(email, pass); }
+  catch(e){ state.authError = e.message || 'Login failed.'; render(); }
+};
+window.doSignup = async function(){
+  const name = document.getElementById('su_name').value.trim();
+  const email = document.getElementById('su_email').value.trim();
+  const pass = document.getElementById('su_pass').value;
+  state.authError = null;
+  if(!name || !email || !pass){ state.authError='All fields are required.'; render(); return; }
+  try{
+    const cred = await auth.createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({displayName: name});
+    const isAdmin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    await withTimeout(db.collection('users').doc(cred.user.uid).set({
+      name, email, status: isAdmin ? 'approved' : 'pending', requestedAt: new Date().toISOString()
+    }), 6000, 'signup-profile');
+  }catch(e){ state.authError = e.message || 'Sign up failed.'; render(); }
+};
+window.doLogout = async function(){ try{ await auth.signOut(); }catch(e){} };
+function renderPendingScreen(){
+  return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;width:100%">
+    <div class="card" style="width:360px;max-width:90vw;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">⏳</div>
+      <div class="brand-mark" style="color:var(--ink);font-size:17px;margin-bottom:6px">Waiting for approval</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">Hi ${esc(state.currentUser.displayName||'')}, your account is created but an admin still needs to approve it before you can see project data.</div>
+      <div style="margin-top:16px"><button class="btn-ghost btn" onclick="doLogout()">Log out</button></div>
+    </div>
+  </div>`;
+}
+function renderRejectedScreen(){
+  return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;width:100%">
+    <div class="card" style="width:360px;max-width:90vw;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">🚫</div>
+      <div class="brand-mark" style="color:var(--ink);font-size:17px;margin-bottom:6px">Access denied</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">Your account request was not approved. Contact your admin if you think this is a mistake.</div>
+      <div style="margin-top:16px"><button class="btn-ghost btn" onclick="doLogout()">Log out</button></div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- Admin: approvals ---------------- */
+async function loadPendingUsers(){
+  if(!state.currentUser || !state.currentUser.isAdmin || !db) return;
+  try{
+    const snap = await withTimeout(db.collection('users').get(), 6000, 'loadUsers');
+    state.pendingUsers = [];
+    snap.forEach(doc=> state.pendingUsers.push(Object.assign({uid:doc.id}, doc.data())));
+  }catch(e){ console.error('load users failed', e); }
+}
+function renderApprovalsTab(){
+  const pending = state.pendingUsers.filter(u=>u.status==='pending');
+  const others = state.pendingUsers.filter(u=>u.status!=='pending');
+  const row = (u)=>{
+    const revokeLabel = u.status==='approved' ? 'Block' : 'Reject';
+    return `<tr>
+      <td>${esc(u.name)}</td><td>${esc(u.email)}</td>
+      <td><span class="status-pill status-${u.status==='approved'?'active':(u.status==='rejected'?'hold':'done')}">${u.status}</span></td>
+      <td style="white-space:nowrap">
+        ${u.status!=='approved' ? `<button class="btn btn-sm" onclick="setUserStatus('${u.uid}','approved')">Approve</button>` : ''}
+        ${u.status!=='rejected' ? `<button class="btn-ghost btn btn-sm" onclick="setUserStatus('${u.uid}','rejected')">${revokeLabel}</button>` : ''}
+      </td>
+    </tr>`;
+  };
+  return `<div class="topbar"><div><div class="page-title">Approvals</div><div class="page-sub">Who can access SITEBOARD — approve, or block anytime, even after they're already in</div></div></div>
+    ${pending.length ? `<div class="section-title">Pending (${pending.length})</div>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead><tbody>${pending.map(row).join('')}</tbody></table>` : ''}
+    ${others.length ? `<div class="section-title">Everyone else</div>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead><tbody>${others.map(row).join('')}</tbody></table>` : ''}
+    ${!state.pendingUsers.length ? '<div class="empty">No sign-ups yet.</div>' : ''}`;
+}
+window.setUserStatus = async function(uid, status){
+  try{
+    await withTimeout(db.collection('users').doc(uid).set({status}, {merge:true}), 6000, 'setUserStatus');
+    await loadPendingUsers();
+    render();
+  }catch(e){ alert('Could not update: '+e.message); }
+};
+
+/* ---------------- Backup: export / import all data as JSON ---------------- */
+window.downloadBackup = function(){
+  const payload = {exportedAt: new Date().toISOString(), projects: state.projects, pdata: state.pdata};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'siteboard-backup-'+isoDate(new Date())+'.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+window.triggerImportBackup = function(){ document.getElementById('backup_file_input').click(); };
+window.handleImportBackup = async function(input){
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    if(!payload.projects || !payload.pdata) throw new Error('This file does not look like a SITEBOARD backup.');
+    if(!confirm('This will REPLACE all current projects with the ones in this backup file. Continue?')) return;
+    state.projects = payload.projects;
+    state.pdata = payload.pdata;
+    await saveProjects();
+    for(const p of state.projects){ await savePData(p.id); }
+    alert('Backup restored.');
+    render();
+  }catch(e){ alert('Could not import backup: '+e.message); }
+  input.value = '';
+};
+
 function render(){
   const app = document.getElementById('app');
+  if(!HAS_ARTIFACT_STORAGE){
+    if(!state.currentUser){ app.innerHTML = renderAuthScreen(); return; }
+    if(state.currentUser.status==='pending'){ app.innerHTML = renderPendingScreen(); return; }
+    if(state.currentUser.status==='rejected'){ app.innerHTML = renderRejectedScreen(); return; }
+  }
+  const pendingCount = state.pendingUsers.filter(u=>u.status==='pending').length;
   app.innerHTML = `
     <div class="sidebar">
       <div class="brand"><div class="brand-mark">SITEBOARD</div><div class="brand-sub">Project Control</div></div>
@@ -551,19 +832,33 @@ function render(){
         ${navItem('projects','▦','Projects')}
         ${navItem('schedule','▬','Schedule')}
         ${navItem('budget','₹','Budget')}
+        ${navItem('billing','$','Billing')}
         ${navItem('resources','⚙','Resources')}
         ${navItem('dpr','▤','DPR Log')}
+        ${canDelete() ? navItem('trash','🗑','Trash') : ''}
+        ${(!HAS_ARTIFACT_STORAGE && state.currentUser && state.currentUser.isAdmin) ? navItem('approvals','✓','Approvals'+(pendingCount?' ('+pendingCount+')':'')) : ''}
       </div>
-      <div class="sidebar-foot"><button class="newproj-btn" onclick="openModal('newproject')">+ New Project</button></div>
+      <div class="sidebar-foot">
+        ${!HAS_ARTIFACT_STORAGE ? `<div style="color:#C7D9E2;font-size:11.5px;margin-bottom:10px">Signed in as<br/><b style="color:#fff">${esc(whoami())}</b> · <a href="#" onclick="doLogout();return false;" style="color:#9FC0D6">Log out</a></div>` : ''}
+        <button class="newproj-btn" onclick="openModal('newproject')" style="margin-bottom:8px">+ New Project</button>
+        <button class="btn-ghost btn" style="width:100%;color:#C7D9E2;border-color:rgba(255,255,255,0.25)" onclick="downloadBackup()">⬇ Backup</button>
+        <button class="btn-ghost btn" style="width:100%;color:#C7D9E2;border-color:rgba(255,255,255,0.25);margin-top:6px" onclick="triggerImportBackup()">⬆ Restore backup</button>
+        <input id="backup_file_input" type="file" accept=".json" style="display:none" onchange="handleImportBackup(this)"/>
+      </div>
     </div>
-    <div class="main">${renderTab()}</div>
+    <div class="main">${undoBannerHTML()}${renderTab()}</div>
     ${state.modal ? renderModal() : ''}
   `;
 }
 function navItem(key,icon,label){
   return `<div class="nav-item ${state.currentTab===key?'active':''}" onclick="setTab('${key}')"><span class="nav-icon">${icon}</span>${label}</div>`;
 }
-window.setTab = function(t){ state.currentTab = t; state.currentTaskId=null; render(); };
+window.setTab = async function(t){
+  state.currentTab = t; state.currentTaskId=null;
+  if(t==='approvals'){ await loadPendingUsers(); }
+  if(t==='projects' && canDelete()){ await loadGlobalTrash(); }
+  render();
+};
 
 function projectSelectorHTML(){
   if(!state.projects.length) return '';
@@ -577,19 +872,22 @@ window.selectProject = async function(id){
 };
 
 function renderTab(){
+  if(state.currentTab==='approvals') return renderApprovalsTab();
   if(state.currentTab==='dashboard') return renderDashboard();
   if(state.currentTab==='projects') return renderProjectsTab();
-  if(!state.currentProjectId && ['schedule','budget','resources','dpr'].includes(state.currentTab)){
+  if(!state.currentProjectId && ['schedule','budget','billing','resources','dpr','trash'].includes(state.currentTab)){
     return `<div class="topbar"><div><div class="page-title">${tabTitle()}</div><div class="page-sub">Pick a project to continue</div></div>${projectSelectorHTML()}</div>
       <div class="empty">Select a project from the dropdown above, or add one first from Projects.</div>`;
   }
   if(state.currentTab==='schedule') return state.currentTaskId ? renderTaskDetail() : renderScheduleTab();
   if(state.currentTab==='budget') return renderBudgetTab();
+  if(state.currentTab==='billing') return renderBillingTab();
   if(state.currentTab==='resources') return renderResourcesTab();
   if(state.currentTab==='dpr') return renderDprTab();
+  if(state.currentTab==='trash') return renderTrashTab();
   return '';
 }
-function tabTitle(){ return {schedule:'Schedule',budget:'Budget',resources:'Resources',dpr:'DPR Log'}[state.currentTab]||''; }
+function tabTitle(){ return {schedule:'Schedule',budget:'Budget',billing:'Billing',resources:'Resources',dpr:'DPR Log',trash:'Trash'}[state.currentTab]||''; }
 
 /* ---------------- Dashboard ---------------- */
 function renderDashboard(){
@@ -599,7 +897,7 @@ function renderDashboard(){
   }
   const cards = state.projects.map(p=>{
     const pd = state.pdata[p.id] || emptyPData();
-    const b = budgetSummary(pd), s = scheduleSummary(pd);
+    const b = budgetSummary(pd), s = scheduleSummary(pd), bl = billingSummary(pd);
     const over = b.act > b.est;
     const color = over ? 'var(--warn)' : 'var(--good)';
     return `<div class="pcard" onclick="openProject('${p.id}')">
@@ -613,7 +911,8 @@ function renderDashboard(){
         <div class="pcard-stats">
           <div class="stat-row"><span>Contract value</span><b>${fmtINR(p.value)}</b></div>
           <div class="stat-row"><span>Spent</span><b class="${over?'row-neg':''}">${fmtINR(b.act)}</b></div>
-          <div class="stat-row"><span>Schedule</span><b>${s.pct}% ${s.delayed?'<span style="color:var(--warn)">(lag)</span>':''}</b></div>
+          <div class="stat-row"><span>Physical progress</span><b>${s.pct}% ${s.delayed?'<span style="color:var(--warn)">(lag)</span>':''}</b></div>
+          <div class="stat-row"><span>Billing progress</span><b>${bl.pct}% <span style="color:var(--ink-soft);font-weight:500">(${fmtINR(bl.totBilled)})</span></b></div>
         </div>
       </div>
     </div>`;
@@ -633,16 +932,49 @@ function renderProjectsTab(){
       <td>${esc(p.name)}</td><td>${esc(p.projectType||'Building')}</td><td>${esc(p.location||'—')}</td><td class="num">${fmtINR(p.value)}</td>
       <td>${p.startDate||'—'} → ${p.endDate||'—'}</td>
       <td><span class="status-pill status-${statusClass(p.status)}">${p.status}</span></td>
-      <td style="white-space:nowrap"><button class="btn-ghost btn btn-sm" onclick="openEditProject('${p.id}')">Edit</button> <button class="btn-del" onclick="deleteProject('${p.id}')">Remove</button></td>
+      <td style="color:var(--ink-soft);font-size:12px">${esc(p.lastEditedBy||p.createdBy||'—')}</td>
+      <td style="white-space:nowrap"><button class="btn-ghost btn btn-sm" onclick="openEditProject('${p.id}')">Edit</button> ${canDelete() ? `<button class="btn-del" onclick="deleteProject('${p.id}')">Remove</button>` : ''}</td>
     </tr>`).join('');
+  const trashRows = canDelete() ? state.globalTrash.map(t=>`<tr>
+      <td>${esc(t.project.name)}</td>
+      <td style="color:var(--ink-soft);font-size:12px">${esc(t.deletedBy)}</td>
+      <td style="color:var(--ink-soft);font-size:12px">${fmtDate(t.deletedAt)}</td>
+      <td class="num">${daysLeft(t.deletedAt)}d left</td>
+      <td><button class="btn btn-sm" onclick="restoreProjectFromTrash('${t.id}')">Restore</button></td>
+    </tr>`).join('') : '';
   return `<div class="topbar"><div><div class="page-title">Projects</div><div class="page-sub">All your projects in one place</div></div>
       <div style="display:flex;gap:8px"><button class="btn" onclick="openModal('newproject')">+ New Project</button></div></div>
-    ${state.projects.length ? `<table><thead><tr><th>Name</th><th>Type</th><th>Location</th><th class="num">Value</th><th>Duration</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No projects yet.</div>'}`;
+    ${state.projects.length ? `<table><thead><tr><th>Name</th><th>Type</th><th>Location</th><th class="num">Value</th><th>Duration</th><th>Status</th><th>Last edited by</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No projects yet.</div>'}
+    ${canDelete() && state.globalTrash.length ? `<div class="section-title">Deleted projects (recoverable for 7 days)</div>
+      <table><thead><tr><th>Name</th><th>Deleted by</th><th>Deleted on</th><th></th><th></th></tr></thead><tbody>${trashRows}</tbody></table>` : ''}`;
 }
+window.restoreProjectFromTrash = async function(trashId){
+  const item = state.globalTrash.find(t=>t.id===trashId);
+  if(!item) return;
+  state.projects.push(item.project);
+  state.pdata[item.project.id] = item.pdata;
+  state.globalTrash = state.globalTrash.filter(t=>t.id!==trashId);
+  await saveProjects();
+  await savePData(item.project.id);
+  await saveGlobalTrash();
+  render();
+};
 window.deleteProject = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
+  const removedProject = state.projects.find(p=>p.id===id);
+  const removedPData = state.pdata[id];
   state.projects = state.projects.filter(p=>p.id!==id); delete state.pdata[id];
   if(state.currentProjectId===id){ state.currentProjectId=null; state.currentTaskId=null; }
-  await saveProjects(); render();
+  await saveProjects();
+  if(removedProject){
+    pushUndo('project', id, {project:removedProject, pdata:removedPData}, (data)=>{
+      state.projects.push(data.project);
+      state.pdata[id] = data.pdata;
+    }, removedProject.name);
+    state.globalTrash.push({id:uid(), project:removedProject, pdata:removedPData, deletedAt:new Date().toISOString(), deletedBy:whoami()});
+    await saveGlobalTrash();
+  }
+  render();
 };
 window.openEditProject = function(id){ state.modal = {type:'editproject', projectId:id}; render(); };
 window.saveEditProject = async function(id){
@@ -657,6 +989,7 @@ window.saveEditProject = async function(id){
   p.startDate = document.getElementById('ep_start').value;
   p.endDate = document.getElementById('ep_end').value;
   p.status = document.getElementById('ep_status').value;
+  p.lastEditedBy = whoami();
   await saveProjects();
   state.modal = null;
   render();
@@ -730,14 +1063,18 @@ window.addTask = async function(){
   const start = document.getElementById('t_start').value;
   if(!name || !qty || !unit || !outputRate || !resources || !start) return alert('All fields are required — qty, unit, output rate, resources, start date.');
   const pd = state.pdata[state.currentProjectId];
-  pd.tasks.push({id:uid(), name, qty, unit, outputRate, resources, start, logs:[]});
+  pd.tasks.push({id:uid(), name, qty, unit, outputRate, resources, start, logs:[], createdBy:whoami()});
   await savePData(state.currentProjectId);
   render();
 };
 window.deleteTaskFromList = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
   const pd = state.pdata[state.currentProjectId];
+  const removed = pd.tasks.find(t=>t.id===id);
   pd.tasks = pd.tasks.filter(t=>t.id!==id);
+  trashPush(pd, 'task', removed, removed?removed.name:'Activity');
   await savePData(state.currentProjectId);
+  pushUndo('task', state.currentProjectId, removed, item=>{ pd.tasks.push(item); });
   render();
 };
 window.openTask = function(id){ state.currentTaskId = id; state.planEditOpen=false; render(); };
@@ -751,7 +1088,7 @@ window.savePlanEdit = async function(taskId){
   const resources = document.getElementById('pe_res').value;
   const start = document.getElementById('pe_start').value;
   if(!qty || !unit || !outputRate || !resources || !start) return alert('All fields are required.');
-  t.qty = qty; t.unit = unit; t.outputRate = outputRate; t.resources = resources; t.start = start;
+  t.qty = qty; t.unit = unit; t.outputRate = outputRate; t.resources = resources; t.start = start; t.lastEditedBy = whoami();
   await savePData(state.currentProjectId);
   state.planEditOpen = false;
   render();
@@ -768,13 +1105,14 @@ function renderTaskDetail(){
 
   const logRows = logs.map(l=>`<tr>
       <td>${fmtDate(l.date)}</td><td class="num">${l.qty} ${esc(t.unit)}</td>
-      <td><button class="btn-del" onclick="deleteLog('${l.id}')">✕</button></td>
+      <td style="color:var(--ink-soft);font-size:12px">${esc(l.by||'—')}</td>
+      <td>${delBtn(`deleteLog('${l.id}')`)}</td>
     </tr>`).join('');
 
   return `<span class="backlink" onclick="backToSchedule()">← Back to schedule</span>
     <div class="topbar"><div><div class="page-title">${esc(t.name)} <span class="badge ${c.statusLabel}">${c.statusText}</span></div>
-      <div class="page-sub">${t.qty} ${esc(t.unit)} · started ${fmtDate(t.start)}</div></div>
-      <button class="btn-del" onclick="deleteTaskFromList('${t.id}'); backToSchedule();">Remove activity</button>
+      <div class="page-sub">${t.qty} ${esc(t.unit)} · started ${fmtDate(t.start)} ${t.createdBy?'· created by '+esc(t.createdBy):''}${t.lastEditedBy?' · plan last edited by '+esc(t.lastEditedBy):''}</div></div>
+      ${canDelete() ? `<button class="btn-del" onclick="deleteTaskFromList('${t.id}'); backToSchedule();">Remove activity</button>` : ''}
     </div>
 
     <div class="card">
@@ -825,7 +1163,7 @@ function renderTaskDetail(){
     </div>
 
     ${logs.length ? `<div class="section-title">Daily log</div>
-      <table><thead><tr><th>Date</th><th class="num">Qty done</th><th></th></tr></thead><tbody>${logRows}</tbody></table>`
+      <table><thead><tr><th>Date</th><th class="num">Qty done</th><th>Logged by</th><th></th></tr></thead><tbody>${logRows}</tbody></table>`
       : '<div class="empty">No daily entries yet — log today\'s progress above.</div>'}`;
 }
 window.addLog = async function(taskId){
@@ -835,35 +1173,53 @@ window.addLog = async function(taskId){
   const pd = state.pdata[state.currentProjectId];
   const t = pd.tasks.find(x=>x.id===taskId);
   const existing = t.logs.find(l=>l.date===date);
-  if(existing){ existing.qty = qty; } else { t.logs.push({id:uid(), date, qty}); }
+  if(existing){ existing.qty = qty; existing.by = whoami(); } else { t.logs.push({id:uid(), date, qty, by:whoami()}); }
   await savePData(state.currentProjectId);
   render();
 };
 window.deleteLog = async function(logId){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
   const pd = state.pdata[state.currentProjectId];
   const t = pd.tasks.find(x=>x.id===state.currentTaskId);
+  const removed = t.logs.find(l=>l.id===logId);
   t.logs = t.logs.filter(l=>l.id!==logId);
+  trashPush(pd, 'log', {taskId:t.id, log:removed}, 'Log entry ('+(removed?removed.date:'')+')');
   await savePData(state.currentProjectId);
+  pushUndo('log', state.currentProjectId, removed, item=>{ t.logs.push(item); }, 'Log entry ('+(removed?removed.date:'')+')');
   render();
 };
 
 /* ---------------- Budget (BOQ) ---------------- */
+function boqBilledSummary(pd, boqId){
+  const entries = (pd.billing||[]).filter(b=>b.boqItemId===boqId);
+  const qty = entries.reduce((s,e)=>s+(Number(e.qty)||0), 0);
+  return {qty, count: entries.length};
+}
 function renderBudgetTab(){
   const p = state.projects.find(x=>x.id===state.currentProjectId);
   const pd = state.pdata[p.id];
   const items = pd.boq||[];
-  let totEst=0, totAct=0;
+  let totEst=0, totAct=0, totBilled=0;
   const rows = items.map(it=>{
     const est = (Number(it.qty)||0)*(Number(it.rate)||0);
     const act = (Number(it.aqty)||0)*(Number(it.arate)||0);
-    totEst+=est; totAct+=act;
+    const bs = boqBilledSummary(pd, it.id);
+    const billed = bs.qty*(Number(it.rate)||0);
+    const pendingBill = est - billed;
+    totEst+=est; totAct+=act; totBilled+=billed;
     const variance = est-act;
     return `<tr>
       <td>${esc(it.item)}</td><td>${esc(it.unit)}</td>
       <td class="num">${it.qty}</td><td class="num">${fmtINR(it.rate)}</td>
-      <td class="num">${fmtINR(est)}</td><td class="num">${fmtINR(act)}</td>
+      <td class="num">${fmtINR(est)}</td>
+      <td class="num"><input type="number" style="width:64px" value="${it.aqty||0}" onchange="updateBoqField('${it.id}','aqty',this.value)"/></td>
+      <td class="num">${fmtINR(act)}</td>
       <td class="num ${variance<0?'row-neg':'row-pos'}">${fmtINR(variance)}</td>
-      <td><button class="btn-del" onclick="deleteBoq('${it.id}')">✕</button></td>
+      <td class="num">${bs.qty} ${esc(it.unit)}${bs.count?` <span style="color:var(--ink-soft);font-size:10.5px">(${bs.count} bill${bs.count>1?'s':''})</span>`:''}</td>
+      <td class="num">${fmtINR(billed)}</td>
+      <td class="num ${pendingBill>0?'row-neg':'row-pos'}">${fmtINR(pendingBill)}</td>
+      <td style="color:var(--ink-soft);font-size:11.5px">${esc(it.lastEditedBy||it.addedBy||'—')}</td>
+      <td style="white-space:nowrap"><button class="btn-ghost btn btn-sm" onclick="goToBillingFor('${it.id}')">Bill</button> ${delBtn(`deleteBoq('${it.id}')`)}</td>
     </tr>`;
   }).join('');
   const overCap = p.value && totEst > Number(p.value);
@@ -880,11 +1236,12 @@ function renderBudgetTab(){
       </div>
       <div style="margin-top:12px"><button class="btn" onclick="addBoq()">Add BOQ item</button></div>
     </div>
-    ${items.length ? `<div style="margin-bottom:14px"><button class="btn btn-sm" onclick="openPlanModal()">⚡ Auto-plan schedule from BOQ</button></div>` : ''}
-    ${items.length ? `<table><thead><tr><th>Item</th><th>Unit</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Estimated</th><th class="num">Actual</th><th class="num">Variance</th><th></th></tr></thead>
-      <tbody>${rows}<tr class="totrow"><td colspan="4">TOTAL</td><td class="num">${fmtINR(totEst)}</td><td class="num">${fmtINR(totAct)}</td><td class="num">${fmtINR(totEst-totAct)}</td><td></td></tr></tbody></table>`
+    ${items.length ? `<div style="margin-bottom:14px;display:flex;gap:8px"><button class="btn btn-sm" onclick="openPlanModal()">⚡ Auto-plan schedule from BOQ</button><button class="btn-ghost btn btn-sm" onclick="setTab('billing')">₹ Go to Billing</button></div>` : ''}
+    ${items.length ? `<div style="overflow:auto"><table><thead><tr><th>Item</th><th>Unit</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Estimated</th><th class="num">Actual Qty</th><th class="num">Actual Amt</th><th class="num">Variance</th><th class="num">Billed Qty</th><th class="num">Billed Amt</th><th class="num">Pending Bill</th><th>Last edited by</th><th></th></tr></thead>
+      <tbody>${rows}<tr class="totrow"><td colspan="4">TOTAL</td><td class="num">${fmtINR(totEst)}</td><td></td><td class="num">${fmtINR(totAct)}</td><td class="num">${fmtINR(totEst-totAct)}</td><td></td><td class="num">${fmtINR(totBilled)}</td><td class="num">${fmtINR(totEst-totBilled)}</td><td></td><td></td></tr></tbody></table></div>`
       : '<div class="empty">No BOQ items yet — add the first one above.</div>'}`;
 }
+window.goToBillingFor = function(boqId){ state.currentTab='billing'; state.billingPreselect = boqId; render(); };
 window.addBoq = async function(){
   const item = document.getElementById('b_item').value.trim();
   const unit = document.getElementById('b_unit').value.trim();
@@ -894,14 +1251,87 @@ window.addBoq = async function(){
   const arate = document.getElementById('b_arate').value;
   if(!item || !unit || !qty || !rate) return alert('Item, unit, qty and rate are required.');
   const pd = state.pdata[state.currentProjectId];
-  pd.boq.push({id:uid(), item, unit, qty, rate, aqty:aqty||0, arate:arate||0});
+  pd.boq.push({id:uid(), item, unit, qty, rate, aqty:aqty||0, arate:arate||0, addedBy:whoami()});
   await savePData(state.currentProjectId);
   render();
 };
-window.deleteBoq = async function(id){
+window.updateBoqField = async function(id, field, value){
   const pd = state.pdata[state.currentProjectId];
-  pd.boq = pd.boq.filter(i=>i.id!==id);
+  const it = pd.boq.find(x=>x.id===id);
+  if(!it) return;
+  it[field] = value;
+  it.lastEditedBy = whoami();
   await savePData(state.currentProjectId);
+};
+window.deleteBoq = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
+  const pd = state.pdata[state.currentProjectId];
+  const removed = pd.boq.find(i=>i.id===id);
+  pd.boq = pd.boq.filter(i=>i.id!==id);
+  trashPush(pd, 'boq', removed, removed?removed.item:'BOQ item');
+  await savePData(state.currentProjectId);
+  pushUndo('boq', state.currentProjectId, removed, item=>{ pd.boq.push(item); }, removed?removed.item:'BOQ item');
+  render();
+};
+
+/* ---------------- Billing (dated entries per BOQ item, with history) ---------------- */
+function renderBillingTab(){
+  const p = state.projects.find(x=>x.id===state.currentProjectId);
+  const pd = state.pdata[p.id];
+  const boqItems = pd.boq||[];
+  if(!boqItems.length){
+    return `<div class="topbar"><div><div class="page-title">Billing — ${esc(p.name)}</div><div class="page-sub">Track client billing against BOQ</div></div>${projectSelectorHTML()}</div>
+      <div class="empty">Add BOQ items in the Budget tab first — billing is logged against a BOQ item.</div>`;
+  }
+  const entries = (pd.billing||[]).slice().sort((a,b)=> b.date.localeCompare(a.date));
+  const itemName = (id)=>{ const it = boqItems.find(x=>x.id===id); return it ? it.item : '(deleted item)'; };
+  const itemUnit = (id)=>{ const it = boqItems.find(x=>x.id===id); return it ? it.unit : ''; };
+  const rows = entries.map(e=>`<tr>
+    <td>${fmtDate(e.date)}</td>
+    <td>${esc(itemName(e.boqItemId))}</td>
+    <td class="num">${e.qty} ${esc(itemUnit(e.boqItemId))}</td>
+    <td>${esc(e.billNo||'—')}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(e.by||'—')}</td>
+    <td>${delBtn(`deleteBilling('${e.id}')`)}</td>
+  </tr>`).join('');
+  const preselect = state.billingPreselect || '';
+  const options = boqItems.map(it=>{
+    const bs = boqBilledSummary(pd, it.id);
+    return `<option value="${it.id}" ${it.id===preselect?'selected':''}>${esc(it.item)} — billed ${bs.qty}/${it.qty} ${esc(it.unit)}</option>`;
+  }).join('');
+  return `<div class="topbar"><div><div class="page-title">Billing — ${esc(p.name)}</div><div class="page-sub">Client billing history, item-wise</div></div>${projectSelectorHTML()}</div>
+    <div class="card">
+      <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Log a billing entry</b></div>
+      <div class="form-grid">
+        <div><label>BOQ item</label><select id="bl_item">${options}</select></div>
+        <div><label>Date</label><input id="bl_date" type="date"/></div>
+        <div><label>Qty billed</label><input id="bl_qty" type="number"/></div>
+        <div><label>Bill / RA No. (optional)</label><input id="bl_billno" placeholder="e.g. RA-3"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" onclick="addBilling()">Add billing entry</button></div>
+    </div>
+    ${entries.length ? `<table><thead><tr><th>Date</th><th>Item</th><th class="num">Qty billed</th><th>Bill No.</th><th>Logged by</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No billing entries yet — log the first one above.</div>'}`;
+}
+window.addBilling = async function(){
+  const boqItemId = document.getElementById('bl_item').value;
+  const date = document.getElementById('bl_date').value;
+  const qty = document.getElementById('bl_qty').value;
+  const billNo = document.getElementById('bl_billno').value.trim();
+  if(!boqItemId || !date || !qty) return alert('BOQ item, date and qty are required.');
+  const pd = state.pdata[state.currentProjectId];
+  pd.billing.push({id:uid(), boqItemId, date, qty, billNo, by:whoami()});
+  await savePData(state.currentProjectId);
+  state.billingPreselect = null;
+  render();
+};
+window.deleteBilling = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
+  const pd = state.pdata[state.currentProjectId];
+  const removed = pd.billing.find(b=>b.id===id);
+  pd.billing = pd.billing.filter(b=>b.id!==id);
+  trashPush(pd, 'billing', removed, 'Billing entry');
+  await savePData(state.currentProjectId);
+  pushUndo('billing', state.currentProjectId, removed, item=>{ pd.billing.push(item); }, 'Billing entry');
   render();
 };
 
@@ -913,7 +1343,8 @@ function renderResourcesTab(){
   const rows = items.map(r=>`<tr>
     <td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${esc(r.desc)}</td>
     <td class="num">${r.qty} ${esc(r.unit||'')}</td>
-    <td><button class="btn-del" onclick="deleteResource('${r.id}')">✕</button></td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(r.by||'—')}</td>
+    <td>${delBtn(`deleteResource('${r.id}')`)}</td>
   </tr>`).join('');
   return `<div class="topbar"><div><div class="page-title">Resources — ${esc(p.name)}</div><div class="page-sub">Labour, equipment &amp; material log</div></div>${projectSelectorHTML()}</div>
     <div class="card">
@@ -927,7 +1358,7 @@ function renderResourcesTab(){
       </div>
       <div style="margin-top:12px"><button class="btn" onclick="addResource()">Add entry</button></div>
     </div>
-    ${items.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="num">Qty</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No resource entries yet.</div>'}`;
+    ${items.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="num">Qty</th><th>Logged by</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No resource entries yet.</div>'}`;
 }
 window.addResource = async function(){
   const date = document.getElementById('r_date').value;
@@ -937,14 +1368,18 @@ window.addResource = async function(){
   const unit = document.getElementById('r_unit').value.trim();
   if(!date || !desc || !qty) return alert('Date, description and qty are required.');
   const pd = state.pdata[state.currentProjectId];
-  pd.resources.push({id:uid(), date, type, desc, qty, unit});
+  pd.resources.push({id:uid(), date, type, desc, qty, unit, by:whoami()});
   await savePData(state.currentProjectId);
   render();
 };
 window.deleteResource = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
   const pd = state.pdata[state.currentProjectId];
+  const removed = pd.resources.find(r=>r.id===id);
   pd.resources = pd.resources.filter(r=>r.id!==id);
+  trashPush(pd, 'resource', removed, removed?removed.desc:'Resource entry');
   await savePData(state.currentProjectId);
+  pushUndo('resource', state.currentProjectId, removed, item=>{ pd.resources.push(item); }, removed?removed.desc:'Resource entry');
   render();
 };
 
@@ -956,16 +1391,18 @@ function renderDprTab(){
   const rows = items.map(d=>`<tr>
     <td>${fmtDate(d.date)}</td><td class="num">${d.labour}</td><td class="num">${d.equipHours}</td>
     <td>${esc(d.note)}</td><td>${esc(d.issues||'—')}</td>
-    <td><button class="btn-del" onclick="deleteDpr('${d.id}')">✕</button></td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(d.by||'—')}</td>
+    <td>${delBtn(`deleteDpr('${d.id}')`)}</td>
   </tr>`).join('');
 
   const today = isoDate(new Date());
-  const activeTasks = (pd.tasks||[]).map(t=>({t,c:taskCalc(t)})).filter(({t,c})=>c.remainingQty>0 && new Date(t.start)<=new Date());
+  const activeTasks = (pd.tasks||[]).map(t=>({t,c:taskCalc(t)})).filter(({c})=>c.remainingQty>0);
   const targetRows = activeTasks.map(({t,c})=>{
     const todaysLog = (t.logs||[]).find(l=>l.date===today);
     const behind = c.statusLabel==='behind';
+    const notStarted = new Date(t.start) > new Date();
     return `<tr>
-      <td>${esc(t.name)}${behind?' <span class="badge behind" style="font-size:9px">behind</span>':''}</td>
+      <td>${esc(t.name)}${behind?' <span class="badge behind" style="font-size:9px">behind</span>':''}${notStarted?' <span style="font-size:9px;color:var(--ink-faint);font-weight:600">(planned '+fmtDate(t.start)+')</span>':''}</td>
       <td class="num">${c.dailyTarget} ${esc(t.unit)}/day</td>
       <td class="num">${Math.round(c.targetCumToday*10)/10} ${esc(t.unit)}</td>
       <td class="num">${c.cumDone} ${esc(t.unit)}</td>
@@ -980,7 +1417,7 @@ function renderDprTab(){
       <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">These targets come from Schedule (BOQ auto-plan). Log today's actual quantity right here — the Schedule tab updates automatically.</div>
       <div style="overflow:auto"><table><thead><tr><th>Activity</th><th class="num">Target/day</th><th class="num">Should be done by today</th><th class="num">Done so far</th><th>Today's actual</th><th></th></tr></thead>
       <tbody>${targetRows}</tbody></table></div>
-    </div>` : `<div class="card"><div class="empty">No active activity yet — generate a plan from BOQ in the Schedule tab first.</div></div>`}
+    </div>` : `<div class="card"><div class="empty">No active activity yet. Go to <b>Budget</b> tab, add your BOQ items with quantities, then click <b>"⚡ Auto-plan schedule from BOQ"</b> there — that turns each BOQ item into a schedulable activity with a daily target, and it will then show up here for daily logging.</div></div>`}
     <div class="card">
       <div class="toolbar"><b style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;">Today's entry — overall site summary</b></div>
       <div class="form-grid">
@@ -992,7 +1429,7 @@ function renderDprTab(){
       <div style="margin-top:10px"><label>Issues / delays (optional)</label><textarea id="d_issues" placeholder="Any hindrance…"></textarea></div>
       <div style="margin-top:12px"><button class="btn" onclick="addDpr()">Save DPR entry</button></div>
     </div>
-    ${items.length ? `<table><thead><tr><th>Date</th><th class="num">Labour</th><th class="num">Equip. hrs</th><th>Progress</th><th>Issues</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No DPR entries yet.</div>'}`;
+    ${items.length ? `<table><thead><tr><th>Date</th><th class="num">Labour</th><th class="num">Equip. hrs</th><th>Progress</th><th>Issues</th><th>Logged by</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No DPR entries yet.</div>'}`;
 }
 window.saveQuickLog = async function(taskId){
   const el = document.getElementById('q_'+taskId);
@@ -1002,7 +1439,7 @@ window.saveQuickLog = async function(taskId){
   const t = pd.tasks.find(x=>x.id===taskId);
   const date = isoDate(new Date());
   const existing = t.logs.find(l=>l.date===date);
-  if(existing){ existing.qty = val; } else { t.logs.push({id:uid(), date, qty:val}); }
+  if(existing){ existing.qty = val; existing.by = whoami(); } else { t.logs.push({id:uid(), date, qty:val, by:whoami()}); }
   await savePData(state.currentProjectId);
   render();
 };
@@ -1014,14 +1451,18 @@ window.addDpr = async function(){
   const issues = document.getElementById('d_issues').value.trim();
   if(!date || !note) return alert('Date and progress note are required.');
   const pd = state.pdata[state.currentProjectId];
-  pd.dpr.push({id:uid(), date, labour:labour||0, equipHours:equipHours||0, note, issues});
+  pd.dpr.push({id:uid(), date, labour:labour||0, equipHours:equipHours||0, note, issues, by:whoami()});
   await savePData(state.currentProjectId);
   render();
 };
 window.deleteDpr = async function(id){
+  if(!canDelete()){ alert('Only the admin can delete.'); return; }
   const pd = state.pdata[state.currentProjectId];
+  const removed = pd.dpr.find(d=>d.id===id);
   pd.dpr = pd.dpr.filter(d=>d.id!==id);
+  trashPush(pd, 'dpr', removed, removed?('DPR entry '+removed.date):'DPR entry');
   await savePData(state.currentProjectId);
+  pushUndo('dpr', state.currentProjectId, removed, item=>{ pd.dpr.push(item); }, removed?('DPR entry '+removed.date):'DPR entry');
   render();
 };
 
@@ -1124,7 +1565,7 @@ function renderPlanModal(){
       <div class="form-grid">
         <div><label>Project start date</label><input type="date" value="${state.planStart}" onchange="state.planStart=this.value;render()"/></div>
         <div><label>Scheduling mode</label><select onchange="state.planMode=this.value;render()">
-          <option value="sequential" ${state.planMode==='sequential'?'selected':''}>Sequential (ek activity ek baad ek — single crew)</option>
+          <option value="sequential" ${state.planMode==='sequential'?'selected':''}>Sequential (one activity after another — single crew)</option>
           <option value="stage" ${state.planMode==='stage'?'selected':''}>Stage-wise (same-stage work in parallel, separate crews)</option>
         </select></div>
       </div>
@@ -1217,7 +1658,7 @@ window.createProject = async function(){
   const status = document.getElementById('np_status').value;
   if(!name) return alert('Project name is required.');
   const id = uid();
-  state.projects.push({id, name, projectType, location, value, startDate, endDate, status});
+  state.projects.push({id, name, projectType, location, value, startDate, endDate, status, createdBy: whoami()});
   state.pdata[id] = emptyPData();
   await saveProjects();
   await savePData(id);
@@ -1227,15 +1668,8 @@ window.createProject = async function(){
 
 function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-(async function boot(){
+async function loadAppData(){
   document.getElementById('app').innerHTML = '<div style="padding:40px;font-family:var(--font-body);color:var(--ink-soft)">Loading…</div>';
-  if(!HAS_ARTIFACT_STORAGE && !db){
-    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:520px">
-      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:10px">⚠ Can't connect to Firebase</div>
-      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">This usually means either the internet connection dropped while loading the Firebase SDK, or the config in FIREBASE_CONFIG hasn't been filled in correctly yet.<br/><br/>
-      Check your internet connection and refresh. If that doesn't help, open the browser's developer console (F12) and look for the exact error message.</div></div>`;
-    return;
-  }
   await loadProjects();
   if(state.loadError){
     document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:560px">
@@ -1249,7 +1683,8 @@ function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>
     let seeded = false;
     try{
       if(HAS_ARTIFACT_STORAGE){
-        const r = await window.storage.get('seeded_v1', false); seeded = !!(r && r.value);
+        try{ const r = await window.storage.get('seeded_v1', false); seeded = !!(r && r.value); }
+        catch(notFound){ seeded = false; } // key doesn't exist yet — normal, not an error
       } else if(db){
         const snap = await withTimeout(db.collection('meta').doc('seeded').get(), 6000, 'seeded-check'); seeded = snap.exists && snap.data().done;
       }
@@ -1269,7 +1704,59 @@ function esc(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>
       <div style="margin-top:14px"><button class="btn" onclick="location.reload()">Retry</button></div></div>`;
     return;
   }
+  if(state.currentUser && state.currentUser.isAdmin){ await loadPendingUsers(); }
+  if(canDelete()){ await loadGlobalTrash(); }
   render();
+}
+
+(async function boot(){
+  document.getElementById('app').innerHTML = '<div style="padding:40px;font-family:var(--font-body);color:var(--ink-soft)">Loading…</div>';
+  if(!HAS_ARTIFACT_STORAGE && !db){
+    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:var(--font-body);max-width:520px">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:10px">⚠ Can't connect to Firebase</div>
+      <div style="color:var(--ink-soft);font-size:13px;line-height:1.6">This usually means either the internet connection dropped while loading the Firebase SDK, or the config in FIREBASE_CONFIG hasn't been filled in correctly yet.<br/><br/>
+      Check your internet connection and refresh. If that doesn't help, open the browser's developer console (F12) and look for the exact error message.</div></div>`;
+    return;
+  }
+  if(HAS_ARTIFACT_STORAGE){
+    await loadAppData();
+    return;
+  }
+  let profileUnsub = null;
+  auth.onAuthStateChanged(async (user)=>{
+    if(profileUnsub){ try{ profileUnsub(); }catch(e){} profileUnsub = null; }
+    if(!user){ state.currentUser = null; render(); return; }
+    const isAdmin = (user.email||'').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    let profile = null;
+    try{
+      const snap = await withTimeout(db.collection('users').doc(user.uid).get(), 6000, 'load-profile');
+      profile = snap.exists ? snap.data() : null;
+    }catch(e){ console.error('load profile failed', e); }
+    if(!profile){
+      profile = {name: user.displayName || user.email, email: user.email, status: isAdmin ? 'approved' : 'pending', requestedAt: new Date().toISOString()};
+      try{ await withTimeout(db.collection('users').doc(user.uid).set(profile), 6000, 'create-profile'); }catch(e){}
+    } else if(isAdmin && profile.status!=='approved'){
+      profile.status = 'approved';
+      try{ await withTimeout(db.collection('users').doc(user.uid).set({status:'approved'}, {merge:true}), 6000, 'admin-auto-approve'); }catch(e){}
+    }
+    state.currentUser = {uid:user.uid, email:user.email, displayName: user.displayName || profile.name, status: profile.status, isAdmin};
+    // Live-watch this user's own approval status — so an admin blocking/approving someone
+    // takes effect immediately for that person, without needing to log out and back in.
+    try{
+      profileUnsub = db.collection('users').doc(user.uid).onSnapshot(snap=>{
+        if(!snap.exists || !state.currentUser) return;
+        const newStatus = snap.data().status;
+        if(newStatus !== state.currentUser.status){
+          const wasApproved = state.currentUser.status === 'approved';
+          state.currentUser.status = newStatus;
+          if(newStatus==='approved' && !wasApproved){ loadAppData(); }
+          else if(newStatus!=='approved'){ render(); }
+        }
+      });
+    }catch(e){}
+    if(profile.status==='approved'){ await loadAppData(); }
+    else { render(); }
+  });
 })();
 </script>
 </body>
