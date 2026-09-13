@@ -682,7 +682,7 @@ function renderAuthScreen(){
       <div class="brand-mark" style="color:var(--ink);font-size:20px;margin-bottom:2px">SITEBOARD</div>
       <div style="color:var(--ink-soft);font-size:12px;margin-bottom:18px">Sign in to continue</div>
       ${state.authError ? `<div style="color:var(--warn);font-size:12px;margin-bottom:10px">${esc(state.authError)}</div>` : ''}
-      <label>Email</label><input id="li_email" type="email" placeholder="you@graphonet.com" autocomplete="username"/>
+      <label>Email</label><input id="li_email" type="email" placeholder="you@graphonet.in" autocomplete="username"/>
       <div style="margin-top:10px"><label>Password</label><input id="li_pass" type="password" placeholder="••••••••" autocomplete="current-password"/></div>
       <div style="margin-top:16px"><button class="btn" style="width:100%" onclick="doLogin()">Log in</button></div>
       <div style="margin-top:12px;font-size:11.5px;color:var(--ink-soft)">New here? <a href="#" onclick="state.authView='signup';state.authError=null;render();return false;">Create an account</a></div>
@@ -695,8 +695,8 @@ function renderSignupScreen(){
       <div class="brand-mark" style="color:var(--ink);font-size:20px;margin-bottom:2px">SITEBOARD</div>
       <div style="color:var(--ink-soft);font-size:12px;margin-bottom:18px">Create your account</div>
       ${state.authError ? `<div style="color:var(--warn);font-size:12px;margin-bottom:10px">${esc(state.authError)}</div>` : ''}
-      <label>Your name</label><input id="su_name" placeholder="e.g. Rahul Sharma"/>
-      <div style="margin-top:10px"><label>Email</label><input id="su_email" type="email" placeholder="you@graphonet.com" autocomplete="username"/></div>
+      <label>Your name</label><input id="su_name" placeholder="e.g. Himanshu Mehta"/>
+      <div style="margin-top:10px"><label>Email</label><input id="su_email" type="email" placeholder="you@graphonet.in" autocomplete="username"/></div>
       <div style="margin-top:10px"><label>Password</label><input id="su_pass" type="password" placeholder="At least 6 characters" autocomplete="new-password"/></div>
       <div style="margin-top:16px"><button class="btn" style="width:100%" onclick="doSignup()">Sign up</button></div>
       <div style="margin-top:10px;font-size:11px;color:var(--ink-soft)">Your account needs admin approval before you can see project data.</div>
